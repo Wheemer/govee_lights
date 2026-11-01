@@ -387,6 +387,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: GoveeBLEConfigEntry) ->
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: GoveeBLEConfigEntry) -> None:
+    if entry.data.get(CONF_LAN_IP) is not None:
+        # LAN entries never register BLE Effect Studio state or DreamView
+        # claims. Keep their teardown in the LAN transport boundary.
+        ir.async_delete_issue(hass, DOMAIN, _unsupported_model_issue_id(entry))
+        if entry.unique_id is not None:
+            clear_availability_log_state(hass, entry.unique_id)
+            clear_stale_gatt_recovery(hass, entry.unique_id)
+        return
     await async_cleanup_dreamview_claims_on_entry_removed(hass, entry.entry_id)
     effect_backend = get_effect_backend(hass)
     if effect_backend is not None:

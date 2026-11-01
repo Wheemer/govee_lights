@@ -118,7 +118,7 @@ def test_h6172_and_h618f_preserve_the_documented_segment_family_frames() -> None
 
 def test_generic_legacy_family_uses_the_ported_raw_rgb_wire_format() -> None:
     """All APK-local members share the portable integration's basic envelope."""
-    assert len(_LEGACY_GENERIC_RGB_MODELS) == 63
+    assert len(_LEGACY_GENERIC_RGB_MODELS) == 401
     for model in _LEGACY_GENERIC_RGB_MODELS:
         profile = MODEL_PROFILES[model]
         rgb = build_color_rgb(10, 20, 30, model, profile=profile)

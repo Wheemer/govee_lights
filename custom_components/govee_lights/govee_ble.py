@@ -30,12 +30,15 @@ from homeassistant.helpers.event import async_call_later
 
 from .const import DOMAIN
 from .coordinator import GoveeCoordinator
+from .govee import GoveeHelper
+from .legacy_protocol import build_single_packet as build_legacy_single_packet
+from .legacy_protocol import sign_payload as sign_legacy_payload
 
 if TYPE_CHECKING:
     from datetime import datetime
 
     from bleak.backends.device import BLEDevice
-from .govee import GoveeHelper
+
 from .models import (
     get_segment_count,
     has_advert_state,
@@ -164,20 +167,13 @@ class GoveeBLE(GoveeHelper):
 
     @staticmethod
     def sign_payload(data: bytes | bytearray | array.array[int]) -> int:
-        """XOR checksum over all bytes."""
-        checksum = 0
-        for b in data:
-            checksum ^= b
-        return checksum & 0xFF
+        """XOR checksum over all bytes (legacy public compatibility wrapper)."""
+        return sign_legacy_payload(data)
 
     @staticmethod
     def build_single_packet(cmd: int, payload: bytes | list[int]) -> bytes:
         """Build (but do not send) a signed 20-byte command packet."""
-        if len(payload) > 17:
-            raise ValueError("Payload too long")
-        frame = bytes([0x33, cmd & 0xFF]) + bytes(payload)
-        frame += bytes([0] * (19 - len(frame)))
-        return frame + bytes([GoveeBLE.sign_payload(frame)])
+        return build_legacy_single_packet(cmd, payload)
 
     @staticmethod
     def build_segment_packets(

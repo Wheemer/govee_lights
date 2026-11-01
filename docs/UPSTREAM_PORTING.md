@@ -49,6 +49,15 @@ paths are cloud/MQTT semantics, not evidence of a local LAN controller.
 5. Add H7172 and other appliance families from documented API/MQTT fixtures,
    then pursue local control only where the APK or wire capture proves it.
 
+## Current selective ports
+
+- **H617F:** Teh-Hippo's explicit H617F profile is a direct H617A
+  command/status grammar sibling. This project therefore routes H617F through
+  its existing H617A-compatible segmented and percentage-brightness handling,
+  but labels it `experimental` pending an independent packet capture or
+  physical-device validation. This is not an assertion that the advanced
+  effects, segment readback, or every H617A feature has been ported.
+
 ## Acceptance rule for a new family
 
 A new model or family must have all of the following before it is described as

@@ -23,6 +23,18 @@ def test_h613e_profile_is_verified_and_uses_its_bk_family() -> None:
     assert profile.features["colour_d"] is True
 
 
+def test_h617f_uses_the_explicit_h617a_compatible_experimental_profile() -> None:
+    profile = get_model_profile("h617f")
+
+    assert profile.support_quality is SupportQuality.EXPERIMENTAL
+    assert profile.family == "legacy_h617a"
+    assert profile.features == {
+        "segmented": True,
+        "brightness_percent": True,
+        "advert_state": True,
+    }
+
+
 def test_unlisted_model_remains_a_generic_fallback() -> None:
     profile = get_model_profile("H9999")
 

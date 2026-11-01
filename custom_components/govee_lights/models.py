@@ -99,6 +99,12 @@ _DEVICE_FEATURES: dict[str, dict[str, bool | int]] = {
     "H617A": {"segmented": True, "brightness_percent": True, "advert_state": True},
     "H617C": {"segmented": True, "brightness_percent": True, "advert_state": True},
     "H617E": {"segmented": True, "brightness_percent": True, "colour_d": True},
+    # Teh-Hippo's MIT-licensed, packet-tested profile defines H617F as a
+    # direct H617A command/status grammar sibling.  Keep it experimental here
+    # until this integration has an independent device trace, but use the
+    # same established segmented/percent-brightness policy as H617A rather
+    # than falling through to the unsafe single-zone generic encoder.
+    "H617F": {"segmented": True, "brightness_percent": True, "advert_state": True},
     "H618C": {"segmented": True, "brightness_percent": True},
     "H6199": {"segmented": True, "brightness_percent": True},
 }
@@ -108,6 +114,7 @@ _DEVICE_FEATURES: dict[str, dict[str, bool | int]] = {
 # verified per-model protocol implementation merely because its name matches.
 _MODEL_PROFILE_METADATA: Final[dict[str, tuple[SupportQuality, str]]] = {
     "H613E": (SupportQuality.VERIFIED, "legacy_0d_bk"),
+    "H617F": (SupportQuality.EXPERIMENTAL, "legacy_h617a"),
 }
 
 

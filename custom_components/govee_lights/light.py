@@ -578,7 +578,8 @@ class GoveeSegmentLight(LightEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         base = kwargs.get(ATTR_RGB_COLOR) or self.rgb_color or (255, 255, 255)
         current = self.brightness
-        brightness = kwargs.get(ATTR_BRIGHTNESS) or (current if current else 255)
+        requested_brightness = kwargs.get(ATTR_BRIGHTNESS)
+        brightness = requested_brightness if requested_brightness is not None else (current if current else 255)
         hub = self._coordinator
         if not hub.is_on:
             await hub.async_turn_on()

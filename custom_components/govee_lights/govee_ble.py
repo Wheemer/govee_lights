@@ -28,7 +28,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.event import async_call_later
 
-from .ble_packet_policy import build_color_temp_packet
+from .ble_packet_policy import build_color_temp_packet, encode_ha_brightness
 from .const import DOMAIN
 from .coordinator import GoveeCoordinator
 from .govee import GoveeHelper
@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from bleak.backends.device import BLEDevice
 
 from .models import (
+    get_brightness_wire_range,
     get_segment_count,
     get_segment_readback_group_size,
     has_advert_state,
@@ -673,7 +674,12 @@ class GoveeBLECoordinator(GoveeCoordinator):
 
     async def async_set_brightness(self, brightness: int) -> None:
         """Set brightness. brightness is HA scale (0-255)."""
-        val = round(brightness * 100 / 255) if uses_percent_brightness(self.model) else brightness
+        val = encode_ha_brightness(
+            brightness,
+            percentage=uses_percent_brightness(self.model)
+            or get_brightness_wire_range(self.model) is not None,
+            wire_range=get_brightness_wire_range(self.model),
+        )
         await self.send_command(GoveeBLE.build_single_packet(GoveeBLE.LEDCommand.BRIGHTNESS, [val]))
 
     async def async_set_rgb_color(self, r: int, g: int, b: int, *, verify: bool = True) -> None:

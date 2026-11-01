@@ -21,6 +21,8 @@ Per-model flags:
   response. The H617A legacy default is three; some newer siblings use four.
 - ``brightness_percent``: device expects brightness as a percentage (0-100)
   instead of a raw byte (0-255).
+- ``brightness_wire_range``: percentage brightness is re-encoded into this
+  inclusive device-register range before sending.
 - ``colour_d``: device uses BLE mode byte ``0x0D`` instead of ``0x02`` for
   colour/color-temperature packets.
 - ``color_command_ack_state``: device reports color-command acceptance as ``AA <command>
@@ -99,7 +101,12 @@ _DEVICE_FEATURES: dict[str, dict[str, bool | int]] = {
         "h617a_segment_grammar": True,
         "segment_readback_group_size": 4,
     },
-    "H6102": {"segmented": True, "colour_d": True, "h617a_segment_grammar": True},
+    "H6102": {
+        "segmented": True,
+        "colour_d": True,
+        "h617a_segment_grammar": True,
+        "brightness_wire_range": (20, 254),
+    },
     "H613A": {"brightness_percent": True},
     "H613B": {"colour_d": True},
     "H613D": {"colour_d": True},
@@ -231,6 +238,12 @@ def is_segmented_model(model: str) -> bool:
 def uses_percent_brightness(model: str) -> bool:
     """Return True when *model* expects brightness as a percentage."""
     return bool(_model_features(model).get("brightness_percent", False))
+
+
+def get_brightness_wire_range(model: str) -> tuple[int, int] | None:
+    """Return an optional post-percentage brightness register range."""
+    value = _model_features(model).get("brightness_wire_range")
+    return value if isinstance(value, tuple) else None
 
 
 def uses_colour_d_mode(model: str) -> bool:

@@ -25,7 +25,8 @@ _TEMP_HUMID_PACKED = frozenset(
 
 PASSIVE_CLIMATE_SENSOR_MODELS = _TEMP_HUMID_6 | _TEMP_HUMID_7 | _TEMP_HUMID_9 | _TEMP_HUMID_PACKED
 PASSIVE_PROBE_SENSOR_MODELS = frozenset({"H5181", "H5182", "H5183", "H5184", "H5185", "H5191", "H5198"})
-PASSIVE_SENSOR_MODELS = PASSIVE_CLIMATE_SENSOR_MODELS | PASSIVE_PROBE_SENSOR_MODELS
+PASSIVE_ENVIRONMENT_SENSOR_MODELS = frozenset({"H5106", "H5140"})
+PASSIVE_SENSOR_MODELS = PASSIVE_CLIMATE_SENSOR_MODELS | PASSIVE_PROBE_SENSOR_MODELS | PASSIVE_ENVIRONMENT_SENSOR_MODELS
 _PROBE_COUNT = {"H5181": 1, "H5182": 2, "H5183": 1, "H5184": 4, "H5185": 2, "H5191": 1, "H5198": 4}
 _FOUR_PROBE_IDS = {1: (1, 2), 65: (1, 2), 129: (1, 2), 193: (1, 2), 2: (3, 4), 66: (3, 4), 130: (3, 4), 194: (3, 4)}
 
@@ -48,11 +49,27 @@ class ProbeAdvertisement:
     probes_c: dict[int, float]
 
 
+@dataclass(frozen=True, slots=True)
+class EnvironmentAdvertisement:
+    """A local air-quality advertisement with common climate fields."""
+
+    model: str
+    temperature_c: float
+    humidity_pct: float
+    co2_ppm: int | None = None
+    pm25_ug_m3: int | None = None
+
+
 def sensor_model_from_ble_name(name: str | None) -> str | None:
     """Return a supported passive-climate model encoded in a local name."""
     if not name:
         return None
-    match = _MODEL_RE.search(name.upper())
+    normalized = name.upper()
+    # The H5140's own reference advertisement is named ``GV5140xxxx``.
+    # Unlike the other Govee names it omits the literal model-prefix H.
+    if "5140" in normalized:
+        return "H5140"
+    match = _MODEL_RE.search(normalized)
     if match is None:
         return None
     model = match.group(0)
@@ -67,6 +84,14 @@ def _decode_packed_temp_humidity(data: bytes) -> tuple[float, float, int, bool]:
         temperature = -temperature
     humidity = ((value & 0x7FFFFF) % 1000) / 10.0
     return temperature, humidity, data[3] & 0x7F, bool(data[3] & 0x80)
+
+
+def _decode_temp_humidity(data: bytes) -> tuple[float, float]:
+    value = (data[0] << 16) + (data[1] << 8) + data[2]
+    temperature = int((value & 0x7FFFFF) / 1000) / 10.0
+    if value & 0x800000:
+        temperature = -temperature
+    return temperature, ((value & 0x7FFFFF) % 1000) / 10.0
 
 
 def parse_climate_advertisement(name: str | None, manufacturer_data: Mapping[int, bytes]) -> ClimateAdvertisement | None:
@@ -139,6 +164,34 @@ def parse_probe_advertisement(name: str | None, manufacturer_data: Mapping[int, 
     return None
 
 
-def parse_passive_sensor_advertisement(name: str | None, manufacturer_data: Mapping[int, bytes]) -> ClimateAdvertisement | ProbeAdvertisement | None:
+def parse_environment_advertisement(name: str | None, manufacturer_data: Mapping[int, bytes]) -> EnvironmentAdvertisement | None:
+    """Decode H5140 CO2 and H5106 PM2.5 advertisements without connecting."""
+    model = sensor_model_from_ble_name(name)
+    if model not in PASSIVE_ENVIRONMENT_SENSOR_MODELS:
+        return None
+    for payload in manufacturer_data.values():
+        if model == "H5140" and len(payload) == 8:
+            temperature, humidity = _decode_temp_humidity(payload[2:5])
+            co2 = int.from_bytes(payload[5:7], "big")
+            if not payload[7] and -40 <= temperature <= 100 and 0 <= humidity <= 100:
+                return EnvironmentAdvertisement(model, temperature, humidity, co2_ppm=co2)
+        elif model == "H5106" and len(payload) == 6:
+            value = int.from_bytes(payload[2:6], "big")
+            magnitude = value & 0x7FFFFFFF
+            temperature = int(magnitude / 1_000_000) / 10.0
+            if value & 0x80000000:
+                temperature = -temperature
+            humidity = int((magnitude % 1_000_000) / 1000) / 10.0
+            pm25 = magnitude % 1000
+            if -40 <= temperature <= 100 and 0 <= humidity <= 100:
+                return EnvironmentAdvertisement(model, temperature, humidity, pm25_ug_m3=pm25)
+    return None
+
+
+def parse_passive_sensor_advertisement(name: str | None, manufacturer_data: Mapping[int, bytes]) -> ClimateAdvertisement | ProbeAdvertisement | EnvironmentAdvertisement | None:
     """Decode any currently supported advertisement-only Govee sensor family."""
-    return parse_climate_advertisement(name, manufacturer_data) or parse_probe_advertisement(name, manufacturer_data)
+    return (
+        parse_climate_advertisement(name, manufacturer_data)
+        or parse_probe_advertisement(name, manufacturer_data)
+        or parse_environment_advertisement(name, manufacturer_data)
+    )

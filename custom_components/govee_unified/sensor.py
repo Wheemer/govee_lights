@@ -12,7 +12,15 @@ from .appliance_entity import GoveePassiveSensorEntity
 from .const import ICE_MAKER_MODELS
 from .coordinator import GoveeBLECoordinator
 from .passive_sensor_coordinator import GoveePassiveSensorCoordinator
-from .sensor_protocol import PASSIVE_CLIMATE_SENSOR_MODELS, PASSIVE_PROBE_SENSOR_MODELS, ProbeAdvertisement, probe_count
+from .sensor_protocol import (
+    ClimateAdvertisement,
+    EnvironmentAdvertisement,
+    PASSIVE_CLIMATE_SENSOR_MODELS,
+    PASSIVE_ENVIRONMENT_SENSOR_MODELS,
+    PASSIVE_PROBE_SENSOR_MODELS,
+    ProbeAdvertisement,
+    probe_count,
+)
 from .effect_contracts import CapabilityState
 from .entity import GoveeBLEEntity
 from .video_applicability import h6199_camera_controls_state
@@ -33,6 +41,13 @@ async def async_setup_entry(
             ])
         elif coordinator.model in PASSIVE_PROBE_SENSOR_MODELS:
             async_add_entities([GoveePassiveProbeTemperatureSensor(coordinator, probe) for probe in range(1, probe_count(coordinator.model) + 1)])
+        elif coordinator.model in PASSIVE_ENVIRONMENT_SENSOR_MODELS:
+            entities = [GoveePassiveTemperatureSensor(coordinator), GoveePassiveHumiditySensor(coordinator)]
+            if coordinator.model == "H5140":
+                entities.append(GoveePassiveCO2Sensor(coordinator))
+            else:
+                entities.append(GoveePassivePM25Sensor(coordinator))
+            async_add_entities(entities)
         return
     if isinstance(coordinator, GoveeApplianceCoordinator):
         if coordinator.model in ICE_MAKER_MODELS:
@@ -106,7 +121,8 @@ class GoveePassiveTemperatureSensor(_GoveePassiveClimateSensor):
 
     @property
     def native_value(self) -> float | None:
-        return self.coordinator.data.temperature_c if self.coordinator.data is not None else None
+        data = self.coordinator.data
+        return data.temperature_c if isinstance(data, (ClimateAdvertisement, EnvironmentAdvertisement)) else None
 
 
 class GoveePassiveHumiditySensor(_GoveePassiveClimateSensor):
@@ -119,7 +135,8 @@ class GoveePassiveHumiditySensor(_GoveePassiveClimateSensor):
 
     @property
     def native_value(self) -> float | None:
-        return self.coordinator.data.humidity_pct if self.coordinator.data is not None else None
+        data = self.coordinator.data
+        return data.humidity_pct if isinstance(data, (ClimateAdvertisement, EnvironmentAdvertisement)) else None
 
 
 class GoveePassiveBatterySensor(_GoveePassiveClimateSensor):
@@ -132,7 +149,36 @@ class GoveePassiveBatterySensor(_GoveePassiveClimateSensor):
 
     @property
     def native_value(self) -> int | None:
-        return self.coordinator.data.battery_pct if self.coordinator.data is not None else None
+        data = self.coordinator.data
+        return data.battery_pct if isinstance(data, ClimateAdvertisement) else None
+
+
+class GoveePassiveCO2Sensor(_GoveePassiveClimateSensor):
+    _attr_name = "Carbon Dioxide"
+    _attr_device_class = SensorDeviceClass.CO2
+    _attr_native_unit_of_measurement = "ppm"
+
+    def __init__(self, coordinator: GoveePassiveSensorCoordinator) -> None:
+        super().__init__(coordinator, "carbon_dioxide")
+
+    @property
+    def native_value(self) -> int | None:
+        data = self.coordinator.data
+        return data.co2_ppm if isinstance(data, EnvironmentAdvertisement) else None
+
+
+class GoveePassivePM25Sensor(_GoveePassiveClimateSensor):
+    _attr_name = "PM2.5"
+    _attr_device_class = SensorDeviceClass.PM25
+    _attr_native_unit_of_measurement = "µg/m³"
+
+    def __init__(self, coordinator: GoveePassiveSensorCoordinator) -> None:
+        super().__init__(coordinator, "pm25")
+
+    @property
+    def native_value(self) -> int | None:
+        data = self.coordinator.data
+        return data.pm25_ug_m3 if isinstance(data, EnvironmentAdvertisement) else None
 
 
 class GoveePassiveProbeTemperatureSensor(GoveePassiveSensorEntity, SensorEntity):

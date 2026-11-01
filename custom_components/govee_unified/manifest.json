@@ -3,6 +3,21 @@
   "name": "Govee Unified",
   "bluetooth": [
     {
+      "local_name": "Govee_H*"
+    },
+    {
+      "local_name": "ihoment_H*"
+    },
+    {
+      "local_name": "Minger_H*"
+    },
+    {
+      "local_name": "GBK_H*"
+    },
+    {
+      "local_name": "GVH_H*"
+    },
+    {
       "local_name": "*H6005*"
     },
     {

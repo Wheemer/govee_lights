@@ -92,3 +92,21 @@ def test_h618c_basic_frames_match_the_documented_h617a_rgbic_family() -> None:
         second = builder(*args, "H618C", profile=h618c)
         require_profile_packet(second, h618c)
         assert second == first
+
+
+def test_h6172_and_h618f_preserve_the_documented_segment_family_frames() -> None:
+    """The MQTT implementation explicitly groups these RGBIC products."""
+    reference = MODEL_PROFILES["H617A"]
+    for model, physical_ic_count in (("H6172", 40), ("H618F", 45)):
+        profile = MODEL_PROFILES[model]
+        assert profile.physical_ic_count == physical_ic_count
+        assert profile.segment_count == 15
+        assert profile.supports_segment_writes
+        for builder, args in (
+            (build_color_rgb, (10, 20, 30)),
+            (build_brightness, (50,)),
+        ):
+            expected = builder(*args, "H617A", profile=reference)
+            actual = builder(*args, model, profile=profile)
+            require_profile_packet(actual, profile)
+            assert actual == expected

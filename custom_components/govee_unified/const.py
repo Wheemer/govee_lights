@@ -810,6 +810,33 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
         whole_device_mask=1,
         connection_idle_timeout=3.0,
     ),
+    # GoveeBleMqttServer documents H6172 and H618F together: 0x15 segment
+    # static frames and a 0-100 brightness byte. The APK identifies 40 and 45
+    # physical ICs respectively; this legacy protocol exposes fifteen groups.
+    "H6172": ModelProfile(
+        "H6172 RGBIC LED Strip",
+        support_quality=SupportQuality.SUPPORTED,
+        command_grammar="H617A",
+        command_operations=frozenset({"power", "brightness", "static"}),
+        supports_rgb=True,
+        physical_ic_count=40,
+        whole_device_mask=0x7FFF,
+        segment_count=15,
+        supports_segment_writes=True,
+        connection_idle_timeout=3.0,
+    ),
+    "H618F": ModelProfile(
+        "H618F RGBIC LED Strip",
+        support_quality=SupportQuality.SUPPORTED,
+        command_grammar="H617A",
+        command_operations=frozenset({"power", "brightness", "static"}),
+        supports_rgb=True,
+        physical_ic_count=45,
+        whole_device_mask=0x7FFF,
+        segment_count=15,
+        supports_segment_writes=True,
+        connection_idle_timeout=3.0,
+    ),
     # H613E is a bounded legacy-0D profile. Its APK-derived RGB and Kelvin
     # payloads exactly match H600A's whole-bulb static envelope, but its
     # AA 05 00 reply is a write acknowledgement rather than a state update.

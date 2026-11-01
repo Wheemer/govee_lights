@@ -14,6 +14,7 @@ sys.modules[_SPEC.name] = _PROTOCOL
 _SPEC.loader.exec_module(_PROTOCOL)
 
 build_single_packet = _PROTOCOL.build_single_packet
+build_h617a_segment_color_packet = _PROTOCOL.build_h617a_segment_color_packet
 sign_payload = _PROTOCOL.sign_payload
 
 
@@ -33,6 +34,19 @@ def test_h613e_5000k_frame_matches_observed_native_payload() -> None:
 
     assert frame.hex() == "33050dffffff1388ffe4ce00000000000000008a"
     assert sign_payload(frame[:-1]) == frame[-1]
+
+
+def test_h617a_segment_rgb_frame_matches_upstream_packet_fixture() -> None:
+    """Shared H617A grammar: RGB followed by a little-endian 15-bit mask."""
+    frame = build_h617a_segment_color_packet(10, 20, 30, 0x7FFF)
+
+    assert frame.hex() == "330515010a141e0000000000ff7f0000000000a2"
+    assert sign_payload(frame[:-1]) == frame[-1]
+
+
+def test_h617a_segment_packet_rejects_masks_outside_the_legacy_protocol() -> None:
+    with pytest.raises(ValueError, match="15-bit"):
+        build_h617a_segment_color_packet(1, 2, 3, 0x8000)
 
 
 def test_packet_rejects_payload_that_cannot_fit_the_legacy_envelope() -> None:

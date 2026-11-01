@@ -31,6 +31,7 @@ from homeassistant.helpers.event import async_call_later
 from .const import DOMAIN
 from .coordinator import GoveeCoordinator
 from .govee import GoveeHelper
+from .legacy_protocol import build_h617a_segment_color_packet
 from .legacy_protocol import build_single_packet as build_legacy_single_packet
 from .legacy_protocol import sign_payload as sign_legacy_payload
 
@@ -176,6 +177,11 @@ class GoveeBLE(GoveeHelper):
         return build_legacy_single_packet(cmd, payload)
 
     @staticmethod
+    def build_segment_color_packet(red: int, green: int, blue: int, mask: int) -> bytes:
+        """Build an H617A-family segmented RGB frame."""
+        return build_h617a_segment_color_packet(red, green, blue, mask)
+
+    @staticmethod
     def build_segment_packets(
         colors: dict[int, tuple[int, int, int]], count: int, device: str
     ) -> list[bytes]:
@@ -199,11 +205,7 @@ class GoveeBLE(GoveeHelper):
                 )
             masks[color] = masks.get(color, 0) | (1 << index)
         return [
-            GoveeBLE.build_single_packet(
-                GoveeBLE.LEDCommand.COLOR,
-                [GoveeBLE.LEDMode.SEGMENTS, 0x01, r, g, b,
-                 0x00, 0x00, 0x00, 0x00, 0x00, mask & 0xFF, (mask >> 8) & 0xFF],
-            )
+            GoveeBLE.build_segment_color_packet(r, g, b, mask)
             for (r, g, b), mask in masks.items()
         ]
 
@@ -677,11 +679,7 @@ class GoveeBLECoordinator(GoveeCoordinator):
             self.rgb_color = (r, g, b)
         self.segment_colors = [(r, g, b)] * self.segment_count
         if is_segmented_model(self.model):
-            packet = GoveeBLE.build_single_packet(
-                GoveeBLE.LEDCommand.COLOR,
-                [GoveeBLE.LEDMode.SEGMENTS, 0x01, r, g, b,
-                 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0x7F],
-            )
+            packet = GoveeBLE.build_segment_color_packet(r, g, b, 0x7FFF)
         else:
             packet = GoveeBLE.build_single_packet(
                 GoveeBLE.LEDCommand.COLOR, [mode_byte, r, g, b]

@@ -38,3 +38,18 @@ def build_single_packet(cmd: int, payload: bytes | list[int]) -> bytes:
     frame = bytes([LEGACY_FRAME_PREFIX, cmd & 0xFF]) + bytes(payload)
     frame += bytes(LEGACY_FRAME_LENGTH - 1 - len(frame))
     return frame + bytes([sign_payload(frame)])
+
+
+def build_h617a_segment_color_packet(red: int, green: int, blue: int, mask: int) -> bytes:
+    """Build the shared H617A-family segmented RGB command.
+
+    The H617A grammar uses mode ``0x15``, static-colour selector ``0x01``,
+    and a little-endian segment bitmask. The packet form is also used by the
+    experimentally profiled H6076, H617F, H1A42, and H61F5 models.
+    """
+    if not 0 <= mask <= 0x7FFF:
+        raise ValueError("Segment mask must fit the 15-bit legacy protocol")
+    return build_single_packet(
+        0x05,
+        [0x15, 0x01, red, green, blue, 0x00, 0x00, 0x00, 0x00, 0x00, mask & 0xFF, mask >> 8],
+    )

@@ -1,0 +1,210 @@
+meta:
+  id: govee_shared
+  title: Shared Govee BLE wire datatypes
+  endian: le
+types:
+  rgb:
+    seq:
+      - id: red
+        type: u1
+      - id: green
+        type: u1
+      - id: blue
+        type: u1
+    instances:
+      r:
+        value: red
+      g:
+        value: green
+      b:
+        value: blue
+  brightness_block:
+    seq:
+      - id: brightness_scope_start
+        type: u1
+      - id: brightness_scope_end
+        type: u1
+      - id: brightness_order
+        type: u1
+        enum: brightness_order
+      - id: brightness_speed
+        type: u1
+      - id: brightest_retention
+        type: u1
+      - id: darkest_retention
+        type: u1
+    instances:
+      scope_high:
+        value: brightness_scope_start
+      scope_low:
+        value: brightness_scope_end
+      order:
+        value: brightness_order
+      change_speed:
+        value: brightness_speed
+      retention_brightest:
+        value: brightest_retention
+      retention_darkest:
+        value: darkest_retention
+  movement:
+    seq:
+      - id: packed
+        type: u1
+      - id: interval
+        type: u1
+      - id: speed
+        type: u1
+    instances:
+      enabled:
+        value: '(packed & 0x10) != 0'
+      enter_exit_effect:
+        value: '(packed & 0x04) != 0'
+      direction:
+        value: 'packed & 0x03'
+      unknown_flags:
+        value: 'packed & 0xe8'
+  effect_layer:
+    seq:
+      - id: applied_area
+        type: u1
+        doc: >
+          Packed applied area. The low nibble is the zero-based area index and the high
+          nibble is the area width in tenths. Width 0 is the app's canonical encoding
+          for width 10; raw 0x00 and 0xa0 are therefore semantically full width at index
+          0 but remain byte-distinct and must round-trip unchanged.
+      - id: select_type
+        type: u1
+        enum: select_type
+      - id: select_param_1
+        type: u1
+        doc: 'High byte of BE quantity for types 0/1; random maximum for 2; piece IC count for 3.'
+      - id: select_param_2
+        type: u1
+        doc: 'Low byte of BE quantity for types 0/1; random minimum for 2; gap IC count for 3.'
+      - id: layer_flags
+        type: u1
+        doc: 'Android 7.6.01: high nibble brightness algorithm 0..2, low nibble brightness type 0..3.  Other values remain preserved.'
+      - id: num_brightness_blocks
+        type: u1
+      - id: brightness_blocks
+        type: brightness_block
+        repeat: expr
+        repeat-expr: num_brightness_blocks
+      - id: direction_distribution
+        type: u1
+      - id: colour_speed
+        type: u1
+      - id: colour_retention
+        type: u1
+      - id: num_palette
+        type: u1
+      - id: palette
+        type: rgb
+        repeat: expr
+        repeat-expr: num_palette
+      - id: selected_area_movement
+        type: movement
+      - id: overall_movement
+        type: movement
+      - id: priority
+        type: u1
+      - id: excess
+        size-eos: true
+    instances:
+      applied_area_width_tenths:
+        value: '(applied_area & 0xf0) >> 4'
+      applied_area_start_tenths:
+        value: 'applied_area & 0x0f'
+      applied_area_effective_width_tenths:
+        value: 'applied_area_width_tenths == 0 ? 10 : applied_area_width_tenths'
+      direction_is_backward:
+        value: '(direction_distribution & 0x80) != 0'
+      distribution_method:
+        value: 'direction_distribution & 0x0f'
+      distribution_extensions:
+        value: 'direction_distribution & 0x70'
+      selection_quantity:
+        value: '(select_param_1 << 8) | select_param_2'
+      random_ic_max:
+        value: select_param_1
+      random_ic_min:
+        value: select_param_2
+      piece_ic_count:
+        value: select_param_1
+      gap_ic_count:
+        value: select_param_2
+      brightness_algorithm:
+        value: 'layer_flags >> 4'
+      brightness_type:
+        value: 'layer_flags & 0x0f'
+      brightness_is_gradient:
+        value: '(layer_flags & 0x02) != 0'
+      unknown_flags:
+        value: 'layer_flags & 0xfd'
+  scene_type1_content:
+    seq:
+      - id: config
+        type: u1
+        doc: >
+          Packed colour stride, layout and brightness flag. Layout 1 is present in the
+          app parser and historical cross-SKU data, including stride-5 inline records on
+          exact-SKU downlight/backlight catalogues, while a crafted H617A 0x93 body was
+          acknowledged without replacing the active layout-0 Halloween body. H617A
+          support is therefore rejected rather than inferred from parser structure.
+        valid:
+          expr: 'layout <= 1 and (colour_stride == 3 or (layout == 1 and colour_stride == 5))'
+      - id: num_steps
+        type: u1
+      - id: steps
+        type:
+          switch-on: layout
+          cases:
+            0: scene_type1_step
+            1: scene_type1_step_inline_colour
+        repeat: expr
+        repeat-expr: num_steps
+      - id: num_palette
+        type: u1
+        if: layout == 0
+      - id: palette
+        type: rgb
+        repeat: expr
+        repeat-expr: num_palette
+        if: layout == 0
+      - id: padding
+        type: u1
+        valid: 0
+        repeat: eos
+    instances:
+      colour_stride:
+        value: 'config & 0x07'
+      layout:
+        value: '(config >> 4) & 0x07'
+      brightness_flag:
+        value: '(config & 0x80) != 0'
+  scene_type1_step:
+    seq:
+      - id: colour
+        type: rgb
+      - id: value
+        type: u2
+  scene_type1_step_inline_colour:
+    seq:
+      - id: param
+        type: scene_type1_step
+      - id: colour
+        type: rgb
+      - id: unknown_extra
+        type: u2
+        if: _parent.colour_stride == 5
+enums:
+  brightness_order:
+    0: brightest_darkest
+    1: brightest_darkest_brightest
+    2: darkest_brightest
+    3: darkest_brightest_darkest
+  select_type:
+    0: segment
+    1: select_ic_continuously
+    2: select_ic_randomly
+    3: customize_segment

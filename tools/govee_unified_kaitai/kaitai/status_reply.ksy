@@ -1,0 +1,136 @@
+meta:
+  id: status_reply
+  title: Govee H617A "aa" status-reply envelope (decode-only)
+  endian: le
+  imports:
+    - govee_segment_page
+    - govee_common
+    - speculative/h617a_control_payload
+doc: |
+  H617A 20-byte status reply.  The final byte is the XOR of bytes 0 through 18.
+  Segment replies have five groups of three records and four validated-zero bytes.
+  Issue #286 AA0F is an app/direct-device extension, not official-app capture
+  qualification; its payload remains in speculative/h617a_control_payload.ksy.
+seq:
+  - id: header
+    contents: [0xaa]
+  - id: domain
+    type: u1
+    enum: aa_domain
+  - id: body
+    size: 17
+    type:
+      switch-on: domain
+      cases:
+        'aa_domain::power': power_body
+        'aa_domain::brightness': brightness_body
+        'aa_domain::colormode': colormode_body
+        'aa_domain::fw_version': version_body
+        'aa_domain::hw_version': hw_version_body
+        'aa_domain::light_count': h617a_control_payload::light_count_body
+        'aa_domain::physical_ic_count': physical_ic_count_body
+        'aa_domain::segments': govee_segment_page(15, 3, true)
+        'aa_domain::multi_effect': multi_effect_body
+  - id: checksum
+    type: u1
+enums:
+  aa_domain:
+    0x01: power
+    0x04: brightness
+    0x05: colormode
+    0x06: fw_version
+    0x07: hw_version
+    0x0f: light_count
+    0x40: physical_ic_count
+    0xa3: multi_effect
+    0xa5: segments
+  color_mode:
+    0x15: static
+    0x04: scene
+    0x0a: diy
+    0x13: music
+types:
+  physical_ic_count_body:
+    seq:
+      - id: count
+        type: s2be
+      - id: unknown_tail
+        size-eos: true
+  multi_effect_body:
+    doc: >
+      Readback of the gradual-change boolean written by command_write opcode 0xa3. The
+      value is persistent device state. H617A explicitly exposes no gradual-change
+      capability, and paired physical comparisons found no visible behaviour for true.
+    seq:
+      - id: flag
+        type: u1
+      - id: padding
+        type: u1
+        valid: 0
+        repeat: eos
+  power_body:
+    seq:
+      - id: is_on
+        type: u1
+      - id: padding
+        type: u1
+        valid: 0
+        repeat: eos
+  brightness_body:
+    seq:
+      - id: brightness_pct
+        type: u1
+      - id: padding
+        type: u1
+        valid: 0
+        repeat: eos
+  colormode_body:
+    seq:
+      - id: mode
+        type: u1
+        enum: color_mode
+      - id: mode_body
+        size: 16
+        type:
+          switch-on: mode
+          cases:
+            'color_mode::static': cm_static
+            'color_mode::scene': cm_scene
+            'color_mode::diy': govee_common::diy_selector
+            'color_mode::music': govee_common::music_selector
+  cm_static:
+    seq:
+      - id: sub
+        type: u1
+      - id: kelvin
+        type: u2be
+      - id: unknown_tail
+        size-eos: true
+  cm_scene:
+    seq:
+      - id: scene_id
+        type: u2le
+      - id: padding
+        type: u1
+        valid: 0
+        repeat: eos
+  version_body:
+    seq:
+      - id: text
+        type: strz
+        encoding: ASCII
+      - id: padding
+        type: u1
+        valid: 0
+        repeat: eos
+  hw_version_body:
+    seq:
+      - id: prefix
+        contents: [0x03]
+      - id: text
+        type: strz
+        encoding: ASCII
+      - id: padding
+        type: u1
+        valid: 0
+        repeat: eos

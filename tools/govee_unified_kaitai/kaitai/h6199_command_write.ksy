@@ -1,0 +1,238 @@
+meta:
+  id: h6199_command_write
+  title: Govee H6199 "33" command-write envelope
+  endian: le
+  imports:
+    - govee_shared
+    - speculative/h6199_control_payload
+doc: |
+  H6199 20-byte command frame.  The final byte is the XOR of bytes 0 through 18.
+  Issue #294 DIY0a, direction30, position31 and Gradient A3 extensions are
+  speculative exact-model app/direct-register evidence, not official-app captures;
+  their payloads remain in speculative/h6199_control_payload.ksy.
+seq:
+  - id: header
+    contents: [0x33]
+  - id: opcode
+    type: u1
+    enum: command_op
+  - id: body
+    size: 17
+    type:
+      switch-on: opcode
+      cases:
+        'command_op::power': power_body
+        'command_op::brightness': brightness_body
+        'command_op::mode': mode_body
+        'command_op::display_setting': display_setting_body
+        'command_op::relative_brightness': relative_brightness_body
+        'command_op::strip_direction': h6199_control_payload::write_value
+        'command_op::camera_position': h6199_control_payload::write_value
+        'command_op::gradient': h6199_control_payload::write_value
+  - id: checksum
+    type: u1
+enums:
+  command_op:
+    0x01: power
+    0x04: brightness
+    0x05: mode
+    0x30: strip_direction
+    0x31: camera_position
+    0xa3: gradient
+    0xa9: display_setting
+    0xae: relative_brightness
+  mode_sel:
+    0x00: video
+    0x04: scene
+    0x0a: diy
+    0x15: static_colour
+    0x13: music
+  video_source:
+    0x00: movie
+    0x01: game
+  video_region:
+    0x00: part
+    0x01: all
+  display_setting:
+    0x00: white_balance
+    0x06: scalar_white_balance
+    0x0a: blank_screen
+  blank_screen_detection:
+    0x01: low_brightness
+    0x02: same_tone
+  music_mode:
+    0x03: rhythm
+    0x04: spectrum
+    0x05: energetic
+    0x06: rolling
+  static_operation:
+    0x01: colour
+    0x02: brightness
+types:
+  power_body:
+    seq:
+      - id: is_on
+        type: u1
+  brightness_body:
+    seq:
+      - id: percent
+        type: u1
+  mode_body:
+    seq:
+      - id: sub_mode
+        type: u1
+        enum: mode_sel
+      - id: detail
+        size: 16
+        type:
+          switch-on: sub_mode
+          cases:
+            'mode_sel::video': video_body
+            'mode_sel::scene': scene_body
+            'mode_sel::static_colour': static_colour_body
+            'mode_sel::music': music_body
+            'mode_sel::diy': h6199_control_payload::diy_selector
+  scene_body:
+    seq:
+      - id: scene_id
+        type: u2le
+      - id: music_code
+        type: u2le
+      - id: reserved
+        contents: [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+  video_body:
+    seq:
+      - id: region
+        type: u1
+        enum: video_region
+      - id: source
+        type: u1
+        enum: video_source
+      - id: saturation
+        type: u1
+      - id: sound_effects
+        type: u1
+      - id: softness
+        type: u1
+      - id: relative_brightness_percent
+        type: u1
+        valid:
+          max: 100
+  relative_brightness_body:
+    doc: |
+      H6199 exposes four edge controls. The shared app controller always writes two additional
+      strip slots used by six-segment hardware, but its H6199 path leaves them at zero.
+    seq:
+      - id: selector
+        contents: [0x01]
+      - id: edge_count
+        type: u1
+        valid:
+          any-of: [4, 6]
+      - id: left_percent
+        type: u1
+      - id: top_percent
+        type: u1
+      - id: right_percent
+        type: u1
+      - id: bottom_percent
+        type: u1
+      - id: strip_left_percent
+        type: u1
+      - id: strip_right_percent
+        type: u1
+  display_setting_body:
+    seq:
+      - id: setting
+        type: u1
+        enum: display_setting
+      - id: len
+        type: u1
+      - id: payload
+        size: len
+        type:
+          switch-on: setting
+          cases:
+            'display_setting::white_balance': white_balance_payload
+            'display_setting::scalar_white_balance': scalar_white_balance_payload
+            'display_setting::blank_screen': blank_screen_payload
+      - id: unknown_tail
+        size-eos: true
+  scalar_white_balance_payload:
+    doc: |
+      Govee Android 7.6.01 H6099 white-balance control writes A9 selector 6,
+      length 1.  Encoding knowledge only, not H6099 qualification.
+    seq:
+      - id: value
+        type: u1
+      - id: unknown_tail
+        size-eos: true
+  white_balance_payload:
+    seq:
+      - id: manual
+        type: u1
+      - id: red
+        type: u1
+      - id: blue
+        type: u1
+      - id: unknown_tail
+        size-eos: true
+  blank_screen_payload:
+    doc: |
+      Blank-screen detection policy. The app UI labels the two policies Low Brightness and
+      Same Tone and stores both durations in seconds. The captured H6199 state selects Same
+      Tone with durations 10 and 120 seconds.
+    seq:
+      - id: is_on
+        type: u1
+      - id: detection
+        type: u1
+        enum: blank_screen_detection
+      - id: low_brightness_duration_seconds
+        type: u2
+      - id: same_tone_duration_seconds
+        type: u2
+      - id: unknown_tail
+        size-eos: true
+  music_body:
+    seq:
+      - id: mode
+        type: u1
+        enum: music_mode
+      - id: sensitivity
+        type: u1
+      - id: is_calm
+        type: u1
+      - id: has_fixed_colour
+        type: u1
+      - id: fixed_colour
+        type: govee_shared::rgb
+  static_colour_body:
+    seq:
+      - id: operation
+        type: u1
+        enum: static_operation
+      - id: red
+        type: u1
+        if: operation == static_operation::colour
+      - id: green
+        type: u1
+        if: operation == static_operation::colour
+      - id: blue
+        type: u1
+        if: operation == static_operation::colour
+      - id: kelvin
+        type: u2be
+        if: operation == static_operation::colour
+      - id: preview
+        type: govee_shared::rgb
+        if: operation == static_operation::colour
+      - id: segment_mask
+        type: u2
+        if: operation == static_operation::colour
+      - id: brightness_percent
+        type: u1
+        if: operation == static_operation::brightness
+      - id: brightness_segment_mask
+        type: u2
+        if: operation == static_operation::brightness

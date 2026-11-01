@@ -1,0 +1,163 @@
+meta:
+  id: command_write
+  title: Govee H617A "33" command-write envelope (decode-only)
+  endian: le
+  imports:
+    - govee_shared
+    - govee_common
+doc: |
+  H617A 20-byte command frame.  The final byte is the XOR of bytes 0 through 18.
+  The shared boolean payload also covers H6102 limit opcode 0E (#115), which
+  emits 0E and one boolean byte in Android 7.6.01.  This app-derived extension is
+  not H617A product authorisation or capture qualification.
+seq:
+  - id: header
+    contents: [0x33]
+  - id: opcode
+    type: u1
+    enum: command_op
+  - id: body
+    size: 17
+    type:
+      switch-on: opcode
+      cases:
+        'command_op::power': power_cmd
+        'command_op::brightness': brightness_cmd
+        'command_op::multi': multi_cmd
+        'command_op::multi_effect': multi_effect_cmd
+        'command_op::limit': multi_effect_cmd
+  - id: checksum
+    type: u1
+enums:
+  command_op:
+    0x01: power
+    0x04: brightness
+    0x05: multi
+    0x0e: limit
+    0xa3: multi_effect
+  multi_sub:
+    0x04: scene
+    0x0a: diy
+    0x13: music
+    0x15: static
+instances:
+  is_static:
+    doc: Recognised static operations only, for restricted profile authorisation.
+    value: >-
+      opcode == command_op::multi and body.as<multi_cmd>.sub == multi_sub::static and
+      (body.as<multi_cmd>.sub_body.as<static_cmd>.static_sub == 1 or
+      body.as<multi_cmd>.sub_body.as<static_cmd>.static_sub == 2 or
+      body.as<multi_cmd>.sub_body.as<static_cmd>.static_sub == 3)
+types:
+  upload_frame:
+    doc: A3 transport frame used to validate the completed upload before arming its ACK.
+    seq:
+      - id: header
+        contents: [0xa3]
+      - id: index
+        type: u1
+      - id: body
+        size: 17
+        type:
+          switch-on: index
+          cases:
+            0: upload_start
+      - id: checksum
+        type: u1
+    instances:
+      is_final:
+        value: index == 0xff
+  upload_start:
+    seq:
+      - id: header
+        type: govee_common::a3_header
+      - id: subtype
+        type: u1
+      - id: content
+        size-eos: true
+  multi_effect_cmd:
+    doc: >
+      Boolean gradual-change register. The app writes false as the prologue to
+      per-segment paint batches and labels the switch as gradual colour change. True is
+      accepted, read back and retained across power. H617A goods type 73 is explicitly
+      marked as not supporting gradual change, and paired native-scene, segment-paint and
+      static-colour comparisons produced no visible difference. The raw state is retained
+      as an unsupported device register rather than exposed as a capability.
+    seq:
+      - id: flag
+        type: u1
+      - id: padding
+        type: u1
+        valid: 0
+        repeat: eos
+  power_cmd:
+    seq:
+      - id: is_on
+        type: u1
+  brightness_cmd:
+    seq:
+      - id: percent
+        type: u1
+        valid:
+          max: 100
+  multi_cmd:
+    seq:
+      - id: sub
+        type: u1
+        enum: multi_sub
+      - id: sub_body
+        size: 16
+        type:
+          switch-on: sub
+          cases:
+            'multi_sub::scene': scene_activate
+            'multi_sub::diy': govee_common::diy_selector
+            'multi_sub::music': govee_common::music_selector
+            'multi_sub::static': static_cmd
+  scene_activate:
+    seq:
+      - id: code
+        type: u2le
+      - id: scene_type
+        type: u1
+  segment_mask:
+    seq:
+      - id: bits
+        type: u2le
+  static_cmd:
+    seq:
+      - id: static_sub
+        type: u1
+      - id: static_body
+        size: 15
+        type:
+          switch-on: static_sub
+          cases:
+            0x01: static_color
+            0x02: static_brightness
+            0x03: static_brightness_all
+  static_color:
+    seq:
+      - id: rgb_direct
+        type: govee_shared::rgb
+      - id: kelvin
+        type: u2be
+      - id: rgb_preview
+        type: govee_shared::rgb
+      - id: mask
+        type: segment_mask
+  static_brightness:
+    seq:
+      - id: percent
+        type: u1
+        valid:
+          max: 100
+      - id: mask
+        type: segment_mask
+  static_brightness_all:
+    seq:
+      - id: segment_percent
+        type: u1
+        valid:
+          max: 100
+        repeat: eos

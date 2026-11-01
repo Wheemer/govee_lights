@@ -17,7 +17,9 @@ SupportQuality = _MODELS.SupportQuality
 get_model_profile = _MODELS.get_model_profile
 get_segment_readback_group_size = _MODELS.get_segment_readback_group_size
 get_brightness_wire_range = _MODELS.get_brightness_wire_range
+get_kelvin_range = _MODELS.get_kelvin_range
 supports_segment_brightness = _MODELS.supports_segment_brightness
+uses_kelvin_companion_table = _MODELS.uses_kelvin_companion_table
 uses_h617a_segment_grammar = _MODELS.uses_h617a_segment_grammar
 
 
@@ -27,6 +29,15 @@ def test_h613e_profile_is_verified_and_uses_its_bk_family() -> None:
     assert profile.support_quality is SupportQuality.VERIFIED
     assert profile.family == "legacy_0d_bk"
     assert profile.features["colour_d"] is True
+
+
+def test_h600a_uses_its_bounded_whole_bulb_basic_profile() -> None:
+    profile = get_model_profile("h600a")
+
+    assert profile.support_quality is SupportQuality.EXPERIMENTAL
+    assert profile.family == "legacy_0d_whole_bulb"
+    assert get_kelvin_range("H600A") == (2700, 6500)
+    assert uses_kelvin_companion_table("H600A")
 
 
 def test_h617f_uses_the_explicit_h617a_compatible_experimental_profile() -> None:

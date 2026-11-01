@@ -31,6 +31,7 @@ decode_h617a_segment_status_record = sys.modules[
     "govee_lights.ble_packet_policy"
 ].decode_h617a_segment_status_record
 decode_version_reply = sys.modules["govee_lights.ble_packet_policy"].decode_version_reply
+table_kelvin_rgb = sys.modules["govee_lights.ble_packet_policy"].table_kelvin_rgb
 
 
 def test_h617a_packet_takes_priority_over_colour_d_for_segmented_models() -> None:
@@ -137,3 +138,10 @@ def test_identity_reply_decoder_rejects_malformed_wire_values(
 ) -> None:
     with pytest.raises(ValueError, match=error):
         decode_version_reply(payload, hardware=hardware)
+
+
+def test_h600a_kelvin_companion_uses_the_govee_discrete_table() -> None:
+    assert table_kelvin_rgb(2700) == (255, 174, 84)
+    assert table_kelvin_rgb(4000) == (255, 213, 161)
+    with pytest.raises(ValueError, match="100 K"):
+        table_kelvin_rgb(2750)

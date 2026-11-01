@@ -4,6 +4,16 @@ from __future__ import annotations
 
 from .legacy_protocol import build_h617a_segment_color_temp_packet, build_single_packet
 
+# Govee's whole-bulb H600A protocol uses this discrete 100 K companion RGB
+# table with the native Kelvin field.  It is not interchangeable with the
+# curve-fit preview used by legacy strip families.
+_TABLE_KELVIN_RGB = {
+    1000 + index * 100: bytes.fromhex(rgb)
+    for index, rgb in enumerate(
+        ["ff3300", "ff4500", "ff5200", "ff5d00", "ff6600", "ff6f00", "ff7600", "ff7c00", "ff8200", "ff8700", "ff8d0b", "ff921d", "ff9829", "ff9d33", "ffa23c", "ffa645", "ffaa4d", "ffae54", "ffb25b", "ffb662", "ffb969", "ffbd6f", "ffc076", "ffc37c", "ffc682", "ffc987", "ffcb8d", "ffce92", "ffd097", "ffd39c", "ffd5a1", "ffd7a6", "ffd9ab", "ffdbaf", "ffddb4", "ffdfb8", "ffe1bc", "ffe2c0", "ffe4c4", "ffe5c8", "ffe7cc", "ffe8d0", "ffead3", "ffebd7", "ffedda", "ffeede", "ffefe1", "fff0e4", "fff1e7", "fff3ea", "fff4ed", "fff5f0", "fff6f3", "fff7f7", "fff8f8", "fff9fb", "fff9fd", "fefaff", "fcf8ff", "faf7ff", "f7f5ff", "f5f4ff", "f3f3ff", "f1f1ff", "eff0ff", "eeefff", "eceeff", "eaedff", "e9ecff", "e7eaff", "e5e9ff", "e4e9ff", "e3e8ff", "e1e7ff", "e0e6ff", "dfe5ff", "dde4ff", "dce3ff", "dbe2ff", "dae2ff", "d9e1ff", "d8e0ff", "d7dfff", "d6dfff", "d5deff", "d4ddff", "d3ddff", "d2dcff", "d1dcff", "d0dbff", "cfdaff"]
+    )
+}
+
 
 def encode_ha_brightness(
     brightness: int, *, percentage: bool, wire_range: tuple[int, int] | None = None
@@ -77,6 +87,15 @@ def decode_version_reply(payload: bytes, *, hardware: bool) -> str:
     if not all(part.isdecimal() and part for part in value.split(".")):
         raise ValueError("Version reply is not a dotted numeric version")
     return value
+
+
+def table_kelvin_rgb(kelvin: int) -> tuple[int, int, int]:
+    """Return Govee's discrete companion RGB for an exact 100 K point."""
+    try:
+        red, green, blue = _TABLE_KELVIN_RGB[kelvin]
+    except KeyError as err:
+        raise ValueError("Kelvin value is not in Govee's 100 K companion table") from err
+    return red, green, blue
 
 
 def build_color_temp_packet(

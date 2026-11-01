@@ -34,6 +34,7 @@ from .ble_packet_policy import (
     decode_h617a_segment_status_record,
     decode_version_reply,
     encode_ha_brightness,
+    table_kelvin_rgb,
 )
 from .const import DOMAIN
 from .coordinator import GoveeCoordinator
@@ -53,6 +54,7 @@ if TYPE_CHECKING:
 
 from .models import (
     get_brightness_wire_range,
+    get_kelvin_range,
     get_segment_count,
     get_segment_readback_group_size,
     has_advert_state,
@@ -63,6 +65,7 @@ from .models import (
     uses_colour_d_mode,
     uses_connection_settle,
     uses_h617a_segment_grammar,
+    uses_kelvin_companion_table,
     uses_percent_brightness,
 )
 
@@ -496,11 +499,11 @@ class GoveeBLECoordinator(GoveeCoordinator):
 
     @property
     def min_color_temp_kelvin(self) -> int | None:
-        return 2000
+        return get_kelvin_range(self.model)[0]
 
     @property
     def max_color_temp_kelvin(self) -> int | None:
-        return 9000
+        return get_kelvin_range(self.model)[1]
 
     @property
     def supports_music_modes(self) -> bool:
@@ -750,7 +753,11 @@ class GoveeBLECoordinator(GoveeCoordinator):
         accepts the colour but the on-device mode byte stays MANUAL (0x02) and
         future state-query notifications return a garbled colour.
         """
-        r, g, b = GoveeBLE.kelvin_to_rgb(kelvin)
+        r, g, b = (
+            table_kelvin_rgb(kelvin)
+            if uses_kelvin_companion_table(self.model)
+            else GoveeBLE.kelvin_to_rgb(kelvin)
+        )
         packet = build_color_temp_packet(
             kelvin=kelvin,
             rgb=(r, g, b),

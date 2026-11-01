@@ -25,6 +25,8 @@ Per-model flags:
   inclusive device-register range before sending.
 - ``colour_d``: device uses BLE mode byte ``0x0D`` instead of ``0x02`` for
   colour/color-temperature packets.
+- ``kelvin_companion_table``: colour-temperature writes use Govee's discrete
+  100 K RGB companion table rather than this integration's curve-fit preview.
 - ``color_command_ack_state``: device reports color-command acceptance as ``AA <command>
   00``; preserve the command's optimistic state instead of immediately
   querying and applying a potentially stale report.
@@ -85,6 +87,16 @@ class ModelProfile:
 _MODEL_PATTERN = re.compile(r"[Hh]\d{2,4}[A-Za-z]?\d?")
 
 _DEVICE_FEATURES: dict[str, dict[str, bool | int]] = {
+    # H600A's basic whole-bulb packet grammar is source-reconstructed and
+    # packet-tested upstream.  Advanced scenes/DIY remain out of scope until
+    # the pact-specific upload route is available in this integration.
+    "H600A": {
+        "brightness_percent": True,
+        "colour_d": True,
+        "kelvin_companion_table": True,
+        "min_kelvin": 2700,
+        "max_kelvin": 6500,
+    },
     "H6005": {"colour_d": True},
     "H6052": {"colour_d": True},
     "H6053": {"segmented": True, "segments": 12},
@@ -182,6 +194,7 @@ _DEVICE_FEATURES: dict[str, dict[str, bool | int]] = {
 # usable through the established generic path, but must not be advertised as a
 # verified per-model protocol implementation merely because its name matches.
 _MODEL_PROFILE_METADATA: Final[dict[str, tuple[SupportQuality, str]]] = {
+    "H600A": (SupportQuality.EXPERIMENTAL, "legacy_0d_whole_bulb"),
     "H613E": (SupportQuality.VERIFIED, "legacy_0d_bk"),
     "H6076": (SupportQuality.EXPERIMENTAL, "legacy_h617a"),
     "H617F": (SupportQuality.EXPERIMENTAL, "legacy_h617a"),
@@ -257,6 +270,17 @@ def get_brightness_wire_range(model: str) -> tuple[int, int] | None:
 def uses_colour_d_mode(model: str) -> bool:
     """Return True when *model* uses mode byte 0x0D instead of 0x02."""
     return bool(_model_features(model).get("colour_d", False))
+
+
+def uses_kelvin_companion_table(model: str) -> bool:
+    """Return whether a model requires Govee's discrete Kelvin companion RGB."""
+    return bool(_model_features(model).get("kelvin_companion_table", False))
+
+
+def get_kelvin_range(model: str) -> tuple[int, int]:
+    """Return the model's declared native colour-temperature range."""
+    features = _model_features(model)
+    return int(features.get("min_kelvin", 2000)), int(features.get("max_kelvin", 9000))
 
 
 def uses_h617a_segment_grammar(model: str) -> bool:

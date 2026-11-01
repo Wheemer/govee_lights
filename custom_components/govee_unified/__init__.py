@@ -46,6 +46,8 @@ from .const import (
 )
 from .coordinator import GoveeBLECoordinator, clear_availability_log_state
 from .appliance_coordinator import GoveeApplianceCoordinator
+from .passive_sensor_coordinator import GoveePassiveSensorCoordinator
+from .sensor_protocol import sensor_model_from_ble_name
 from .coordinator_dreamview import (
     async_cleanup_dreamview_claims_on_entry_removed,
     async_guard_dreamview_entry,
@@ -56,11 +58,12 @@ from .effect_setup import async_setup_effects, get_effect_backend
 from .lan_coordinator import GoveeLANCoordinator
 from .light_services import async_register_light_services
 
-type GoveeBLEConfigEntry = ConfigEntry[GoveeBLECoordinator | GoveeApplianceCoordinator]
+type GoveeBLEConfigEntry = ConfigEntry[GoveeBLECoordinator | GoveeApplianceCoordinator | GoveePassiveSensorCoordinator]
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 BLE_PLATFORMS = [Platform.LIGHT, Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH]
 LAN_PLATFORMS = [Platform.BINARY_SENSOR, Platform.LIGHT]
+PASSIVE_SENSOR_PLATFORMS = [Platform.SENSOR]
 _LEGACY_ENTITY_SUFFIXES = {
     "_active_mode",
     "_blank_screen",
@@ -266,6 +269,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: GoveeBLEConfigEntry) -> 
         await hass.config_entries.async_forward_entry_setups(entry, LAN_PLATFORMS)
         return True
     raw_model = entry.data.get(CONF_MODEL)
+    if isinstance(raw_model, str) and sensor_model_from_ble_name(raw_model) is not None:
+        coordinator = GoveePassiveSensorCoordinator(hass, entry.unique_id, raw_model.strip().upper())
+        await coordinator.async_setup()
+        await coordinator.async_config_entry_first_refresh()
+        entry.runtime_data = coordinator
+        await hass.config_entries.async_forward_entry_setups(entry, PASSIVE_SENSOR_PLATFORMS)
+        return True
     if isinstance(raw_model, str) and is_appliance_model(raw_model):
         coordinator = GoveeApplianceCoordinator(hass, entry.unique_id, raw_model.strip().upper())
         await coordinator.async_config_entry_first_refresh()
@@ -386,6 +396,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: GoveeBLEConfigEntry) ->
         if unload_ok := await hass.config_entries.async_unload_platforms(entry, [Platform.SENSOR, Platform.SWITCH]):
             await entry.runtime_data.async_shutdown()
         return unload_ok
+    if isinstance(entry.runtime_data, GoveePassiveSensorCoordinator):
+        if unload_ok := await hass.config_entries.async_unload_platforms(entry, PASSIVE_SENSOR_PLATFORMS):
+            await entry.runtime_data.async_shutdown()
+        return unload_ok
     effect_backend = get_effect_backend(hass)
     if effect_backend is not None:
         await effect_backend.preview.async_unload_device(entry.entry_id)
@@ -408,6 +422,9 @@ async def async_remove_entry(hass: HomeAssistant, entry: GoveeBLEConfigEntry) ->
             clear_stale_gatt_recovery(hass, entry.unique_id)
         return
     raw_model = entry.data.get(CONF_MODEL)
+    if isinstance(raw_model, str) and sensor_model_from_ble_name(raw_model) is not None:
+        ir.async_delete_issue(hass, DOMAIN, _unsupported_model_issue_id(entry))
+        return
     if isinstance(raw_model, str) and is_appliance_model(raw_model):
         ir.async_delete_issue(hass, DOMAIN, _unsupported_model_issue_id(entry))
         if entry.unique_id is not None:

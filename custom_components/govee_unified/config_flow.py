@@ -53,6 +53,7 @@ from .effect_setup import get_effect_backend
 from .firmware_version import FirmwareVersion
 from .h6102_protocol import H6102_PACTS
 from .schema_compat import vol
+from .sensor_protocol import PASSIVE_CLIMATE_SENSOR_MODELS, sensor_model_from_ble_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ class GoveeConfigFlow(ConfigFlow, domain=DOMAIN):
         return GoveeOptionsFlow()
 
     async def async_step_bluetooth(self, discovery_info: BluetoothServiceInfo) -> ConfigFlowResult:
-        model = model_from_ble_name(discovery_info.name)
+        model = model_from_ble_name(discovery_info.name) or sensor_model_from_ble_name(discovery_info.name)
         if model is None:
             return self.async_abort(reason="not_supported")
         await self.async_set_unique_id(discovery_info.address.strip().upper())
@@ -116,17 +117,23 @@ class GoveeConfigFlow(ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(address, raise_on_progress=False)
             self._abort_if_unique_id_configured()
             selected_model = user_input[CONF_MODEL]
-            service_info = bluetooth.async_last_service_info(self.hass, address, connectable=True)
-            advertised_model = model_from_ble_name(service_info.name) if service_info is not None else None
+            passive_sensor = sensor_model_from_ble_name(selected_model) is not None
+            service_info = bluetooth.async_last_service_info(self.hass, address, connectable=not passive_sensor)
+            advertised_model = (
+                model_from_ble_name(service_info.name) or sensor_model_from_ble_name(service_info.name)
+                if service_info is not None
+                else None
+            )
             if advertised_model is not None and advertised_model != selected_model:
                 return self._show_user_form(errors={"base": "model_mismatch"}, step_id="manual_ble")
-            try:
-                await async_validate_ble_connection(self.hass, address)
-            except BleakError:
-                return self._show_user_form(errors={"base": "cannot_connect"}, step_id="manual_ble")
-            except Exception:  # noqa: BLE001 - config flows must surface unexpected validation failures.
-                _LOGGER.exception("Unexpected error validating a Govee BLE device")
-                return self._show_user_form(errors={"base": "unknown"}, step_id="manual_ble")
+            if not passive_sensor:
+                try:
+                    await async_validate_ble_connection(self.hass, address)
+                except BleakError:
+                    return self._show_user_form(errors={"base": "cannot_connect"}, step_id="manual_ble")
+                except Exception:  # noqa: BLE001 - config flows must surface unexpected validation failures.
+                    _LOGGER.exception("Unexpected error validating a Govee BLE device")
+                    return self._show_user_form(errors={"base": "unknown"}, step_id="manual_ble")
             self._abort_if_unique_id_configured()
             if selected_model == "H6102":
                 return await self.async_step_h6102_firmware()
@@ -144,8 +151,15 @@ class GoveeConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             selected_model = user_input[CONF_MODEL]
             assert entry.unique_id is not None
-            service_info = bluetooth.async_last_service_info(self.hass, entry.unique_id, connectable=True)
-            advertised_model = model_from_ble_name(service_info.name) if service_info is not None else None
+            passive_sensor = sensor_model_from_ble_name(selected_model) is not None
+            service_info = bluetooth.async_last_service_info(
+                self.hass, entry.unique_id, connectable=not passive_sensor
+            )
+            advertised_model = (
+                model_from_ble_name(service_info.name) or sensor_model_from_ble_name(service_info.name)
+                if service_info is not None
+                else None
+            )
             if advertised_model is not None and advertised_model != selected_model:
                 return self._show_reconfigure_form(entry, errors={"base": "model_mismatch"})
             if selected_model == "H6102":
@@ -184,7 +198,7 @@ class GoveeConfigFlow(ConfigFlow, domain=DOMAIN):
     async def _async_finish_new_device(self, data: dict[str, str]) -> ConfigFlowResult:
         model = data[CONF_MODEL]
         self._pending_device = data
-        if is_appliance_model(model):
+        if is_appliance_model(model) or sensor_model_from_ble_name(model) is not None:
             self._abort_if_unique_id_configured()
             return self.async_create_entry(title=f"Govee {model}", data=data)
         if MODEL_PROFILES[model].support_quality is SupportQuality.EXPERIMENTAL:
@@ -247,7 +261,11 @@ class GoveeConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_PREFIX_EFFECT_NAMES,
             CONF_ALWAYS_INCLUDE_CUSTOM_EFFECTS,
         }
-        if is_appliance_model(selected_model) or not MODEL_PROFILES[selected_model].state_readable:
+        if (
+            is_appliance_model(selected_model)
+            or sensor_model_from_ble_name(selected_model) is not None
+            or not MODEL_PROFILES[selected_model].state_readable
+        ):
             excluded.add(CONF_CONNECTION_MODE)
         options = {key: value for key, value in entry.options.items() if key not in excluded}
         if selected_model != previous_model and (effect_backend := get_effect_backend(self.hass)) is not None:
@@ -265,7 +283,7 @@ class GoveeConfigFlow(ConfigFlow, domain=DOMAIN):
     def _show_user_form(
         self, *, errors: dict[str, str] | None = None, step_id: str = "user"
     ) -> ConfigFlowResult:
-        models = [*MODEL_PROFILES.keys(), *sorted(APPLIANCE_MODELS)]
+        models = [*MODEL_PROFILES.keys(), *sorted(APPLIANCE_MODELS), *sorted(PASSIVE_CLIMATE_SENSOR_MODELS)]
         return self.async_show_form(
             step_id=step_id,
             data_schema=vol.Schema(
@@ -284,7 +302,7 @@ class GoveeConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] | None = None,
     ) -> ConfigFlowResult:
         current = entry.data.get(CONF_MODEL)
-        models = [*MODEL_PROFILES.keys(), *sorted(APPLIANCE_MODELS)]
+        models = [*MODEL_PROFILES.keys(), *sorted(APPLIANCE_MODELS), *sorted(PASSIVE_CLIMATE_SENSOR_MODELS)]
         default = current if isinstance(current, str) and current in models else models[0]
         return self.async_show_form(
             step_id="reconfigure",

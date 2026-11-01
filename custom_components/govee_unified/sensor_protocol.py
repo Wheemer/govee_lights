@@ -26,8 +26,9 @@ _TEMP_HUMID_PACKED = frozenset(
 PASSIVE_CLIMATE_SENSOR_MODELS = _TEMP_HUMID_6 | _TEMP_HUMID_7 | _TEMP_HUMID_9 | _TEMP_HUMID_PACKED
 PASSIVE_PROBE_SENSOR_MODELS = frozenset({"H5181", "H5182", "H5183", "H5184", "H5185", "H5191", "H5198"})
 PASSIVE_ENVIRONMENT_SENSOR_MODELS = frozenset({"H5106", "H5140"})
+PASSIVE_DUAL_PROBE_SENSOR_MODELS = frozenset({"H5112"})
 PASSIVE_PRESENCE_SENSOR_MODELS = frozenset({"H5127"})
-PASSIVE_SENSOR_MODELS = PASSIVE_CLIMATE_SENSOR_MODELS | PASSIVE_PROBE_SENSOR_MODELS | PASSIVE_ENVIRONMENT_SENSOR_MODELS | PASSIVE_PRESENCE_SENSOR_MODELS
+PASSIVE_SENSOR_MODELS = PASSIVE_CLIMATE_SENSOR_MODELS | PASSIVE_PROBE_SENSOR_MODELS | PASSIVE_ENVIRONMENT_SENSOR_MODELS | PASSIVE_DUAL_PROBE_SENSOR_MODELS | PASSIVE_PRESENCE_SENSOR_MODELS
 _PROBE_COUNT = {"H5181": 1, "H5182": 2, "H5183": 1, "H5184": 4, "H5185": 2, "H5191": 1, "H5198": 4}
 _FOUR_PROBE_IDS = {1: (1, 2), 65: (1, 2), 129: (1, 2), 193: (1, 2), 2: (3, 4), 66: (3, 4), 130: (3, 4), 194: (3, 4)}
 
@@ -68,6 +69,16 @@ class PresenceAdvertisement:
     model: str
     occupied: bool
     motion: bool
+
+
+@dataclass(frozen=True, slots=True)
+class DualProbeAdvertisement:
+    """One rotating H5112 probe reading; the coordinator merges consecutive packets."""
+
+    model: str
+    probes_c: dict[int, float]
+    humidity_pct: float | None
+    battery_pct: int
 
 
 def sensor_model_from_ble_name(name: str | None) -> str | None:
@@ -208,11 +219,28 @@ def parse_presence_advertisement(name: str | None, manufacturer_data: Mapping[in
     return None
 
 
-def parse_passive_sensor_advertisement(name: str | None, manufacturer_data: Mapping[int, bytes]) -> ClimateAdvertisement | ProbeAdvertisement | EnvironmentAdvertisement | PresenceAdvertisement | None:
+def parse_dual_probe_advertisement(name: str | None, manufacturer_data: Mapping[int, bytes]) -> DualProbeAdvertisement | None:
+    model = sensor_model_from_ble_name(name)
+    if model != "H5112":
+        return None
+    for payload in manufacturer_data.values():
+        if len(payload) != 8:
+            continue
+        probe = 1 if payload[7] == 0x41 else 2 if payload[7] == 0x82 else 0
+        if probe == 0:
+            continue
+        temperature, humidity, battery, error = _decode_packed_temp_humidity(payload[2:6])
+        if not error and -40 <= temperature <= 100 and 0 <= humidity <= 100:
+            return DualProbeAdvertisement(model, {probe: temperature}, humidity if probe == 1 else None, battery)
+    return None
+
+
+def parse_passive_sensor_advertisement(name: str | None, manufacturer_data: Mapping[int, bytes]) -> ClimateAdvertisement | ProbeAdvertisement | EnvironmentAdvertisement | PresenceAdvertisement | DualProbeAdvertisement | None:
     """Decode any currently supported advertisement-only Govee sensor family."""
     return (
         parse_climate_advertisement(name, manufacturer_data)
         or parse_probe_advertisement(name, manufacturer_data)
         or parse_environment_advertisement(name, manufacturer_data)
         or parse_presence_advertisement(name, manufacturer_data)
+        or parse_dual_probe_advertisement(name, manufacturer_data)
     )

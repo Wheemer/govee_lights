@@ -11,12 +11,12 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import DOMAIN
-from .sensor_protocol import ClimateAdvertisement, EnvironmentAdvertisement, PresenceAdvertisement, ProbeAdvertisement, parse_passive_sensor_advertisement
+from .sensor_protocol import ClimateAdvertisement, DualProbeAdvertisement, EnvironmentAdvertisement, PresenceAdvertisement, ProbeAdvertisement, parse_passive_sensor_advertisement
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class GoveePassiveSensorCoordinator(DataUpdateCoordinator[ClimateAdvertisement | ProbeAdvertisement | EnvironmentAdvertisement | PresenceAdvertisement | None]):
+class GoveePassiveSensorCoordinator(DataUpdateCoordinator[ClimateAdvertisement | ProbeAdvertisement | EnvironmentAdvertisement | PresenceAdvertisement | DualProbeAdvertisement | None]):
     """Maintain state from BLE advertisements without opening GATT."""
 
     def __init__(self, hass, address: str, model: str) -> None:
@@ -42,7 +42,7 @@ class GoveePassiveSensorCoordinator(DataUpdateCoordinator[ClimateAdvertisement |
             bluetooth.BluetoothScanningMode.PASSIVE,
         )
 
-    async def _async_update_data(self) -> ClimateAdvertisement | ProbeAdvertisement | EnvironmentAdvertisement | PresenceAdvertisement | None:
+    async def _async_update_data(self) -> ClimateAdvertisement | ProbeAdvertisement | EnvironmentAdvertisement | PresenceAdvertisement | DualProbeAdvertisement | None:
         info = bluetooth.async_last_service_info(self.hass, self.address, connectable=False)
         return self._parse(info) if info is not None else self.data
 
@@ -51,9 +51,17 @@ class GoveePassiveSensorCoordinator(DataUpdateCoordinator[ClimateAdvertisement |
         self, info: bluetooth.BluetoothServiceInfoBleak, _change: bluetooth.BluetoothChange
     ) -> None:
         if reading := self._parse(info):
+            if isinstance(reading, DualProbeAdvertisement) and isinstance(self.data, DualProbeAdvertisement):
+                # Retain the prior rotating-probe value until its next packet.
+                reading = DualProbeAdvertisement(
+                    reading.model,
+                    {**self.data.probes_c, **reading.probes_c},
+                    reading.humidity_pct if reading.humidity_pct is not None else self.data.humidity_pct,
+                    reading.battery_pct,
+                )
             self.async_set_updated_data(reading)
 
-    def _parse(self, info: bluetooth.BluetoothServiceInfoBleak) -> ClimateAdvertisement | ProbeAdvertisement | EnvironmentAdvertisement | PresenceAdvertisement | None:
+    def _parse(self, info: bluetooth.BluetoothServiceInfoBleak) -> ClimateAdvertisement | ProbeAdvertisement | EnvironmentAdvertisement | PresenceAdvertisement | DualProbeAdvertisement | None:
         reading = parse_passive_sensor_advertisement(info.name, info.manufacturer_data)
         if reading is None or reading.model != self.model:
             return None

@@ -53,3 +53,12 @@ def transform_legacy_generic_rgb_raw_brightness(packet: bytes) -> bytes:
         frame[2:19] = bytes((0x02, red, green, blue)) + bytes(13)
         return _resign(frame)
     return _scale_brightness_to_255(packet)
+
+
+def transform_h3001_encrypted_static(packet: bytes) -> bytes:
+    """H3001's encrypted RGBIC static frame has an FF/00 mask tail."""
+    if len(packet) == 20 and packet[:4] == b"\x33\x05\x15\x01":
+        frame = bytearray(packet)
+        frame[13] = 0
+        return _resign(frame)
+    return packet

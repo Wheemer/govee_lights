@@ -782,6 +782,7 @@ class GoveeBLECoordinator(
         if self._encryption is None:
             self._encryption = GoveeEncryptionSession()
         self._encryption.reset()
+        self._encryption.required_version = self.profile.encryption_required_version
         try:
             self._client = client = await async_establish_ble_connection(
                 self.hass,

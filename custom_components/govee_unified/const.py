@@ -11,6 +11,7 @@ from .h6199_calibration import WHITE_BALANCE_POSITIONS
 from .legacy_family_protocol import (
     transform_extended_rgb_raw_brightness,
     transform_legacy_generic_rgb_raw_brightness,
+    transform_h3001_encrypted_static,
     transform_legacy_0d_percent_brightness,
     transform_legacy_0d_raw_brightness,
 )
@@ -167,6 +168,7 @@ class ModelProfile:
     # None uses the shared write characteristic. H615B uses the documented
     # alternate control characteristic while retaining the same frame grammar.
     write_characteristic_uuid: str | None = None
+    encryption_required_version: int = 0
     # Some legacy control services reject their first write until descriptors
     # have settled after connection. Zero keeps the standard immediate path.
     connection_settle_seconds: float = 0.0
@@ -2059,6 +2061,18 @@ _HOMEBRIDGE_DEFAULT_BLE_RGB_MODELS = (
     "H8840", "H8841",
 )
 _LEGACY_GENERIC_RGB_MODELS += _HOMEBRIDGE_DEFAULT_BLE_RGB_MODELS
+
+MODEL_PROFILES["H3001"] = ModelProfile(
+    "H3001 Solar String Lights",
+    support_quality=SupportQuality.SUPPORTED,
+    command_grammar="H617A",
+    command_operations=frozenset({"power", "brightness", "static"}),
+    outbound_transform=transform_h3001_encrypted_static,
+    encryption_required_version=2,
+    supports_rgb=True,
+    whole_device_mask=0x00FF,
+    connection_idle_timeout=3.0,
+)
 
 MODEL_PROFILES["H615B"] = ModelProfile(
     "H615B Govee Light",

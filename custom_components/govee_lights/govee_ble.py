@@ -679,7 +679,11 @@ class GoveeBLECoordinator(GoveeCoordinator):
             self.rgb_color = (r, g, b)
         self.segment_colors = [(r, g, b)] * self.segment_count
         if is_segmented_model(self.model):
-            packet = GoveeBLE.build_segment_color_packet(r, g, b, 0x7FFF)
+            # The H617A wire format is 15 bits wide, but a shorter product
+            # must not receive selected bits beyond its declared geometry.
+            # This remains 0x7FFF for established 15-segment models.
+            whole_device_mask = (1 << self.segment_count) - 1
+            packet = GoveeBLE.build_segment_color_packet(r, g, b, whole_device_mask)
         else:
             packet = GoveeBLE.build_single_packet(
                 GoveeBLE.LEDCommand.COLOR, [mode_byte, r, g, b]

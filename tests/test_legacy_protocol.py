@@ -44,6 +44,14 @@ def test_h617a_segment_rgb_frame_matches_upstream_packet_fixture() -> None:
     assert sign_payload(frame[:-1]) == frame[-1]
 
 
+def test_h617a_segment_rgb_uses_only_the_declared_five_segment_mask() -> None:
+    """H1A42's whole-device mask is 0x001F, not the generic 0x7FFF."""
+    frame = build_h617a_segment_color_packet(10, 20, 30, 0x001F)
+
+    assert frame.hex() == "330515010a141e00000000001f0000000000003d"
+    assert sign_payload(frame[:-1]) == frame[-1]
+
+
 def test_h617a_segment_packet_rejects_masks_outside_the_legacy_protocol() -> None:
     with pytest.raises(ValueError, match="15-bit"):
         build_h617a_segment_color_packet(1, 2, 3, 0x8000)

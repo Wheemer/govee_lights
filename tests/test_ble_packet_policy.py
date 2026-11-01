@@ -30,6 +30,7 @@ decode_segment_brightness_percent = sys.modules[
 decode_h617a_segment_status_record = sys.modules[
     "govee_lights.ble_packet_policy"
 ].decode_h617a_segment_status_record
+decode_version_reply = sys.modules["govee_lights.ble_packet_policy"].decode_version_reply
 
 
 def test_h617a_packet_takes_priority_over_colour_d_for_segmented_models() -> None:
@@ -115,3 +116,24 @@ def test_h6102_segment_status_record_preserves_native_brightness_separately_from
 def test_h617a_segment_status_record_requires_exact_wire_length(record: bytes) -> None:
     with pytest.raises(ValueError, match="four bytes"):
         decode_h617a_segment_status_record(record)
+
+
+def test_h6125_identity_reply_decoding_matches_the_apk_reply_layout() -> None:
+    assert decode_version_reply(b"3.04.37\0padding", hardware=False) == "3.04.37"
+    assert decode_version_reply(b"\x033.01.10\0", hardware=True) == "3.01.10"
+
+
+@pytest.mark.parametrize(
+    ("payload", "hardware", "error"),
+    [
+        (b"", False, "empty"),
+        (b"3.x\0", False, "dotted"),
+        (b"\xff\0", False, "ASCII"),
+        (b"\x023.01.10\0", True, "selector"),
+    ],
+)
+def test_identity_reply_decoder_rejects_malformed_wire_values(
+    payload: bytes, hardware: bool, error: str
+) -> None:
+    with pytest.raises(ValueError, match=error):
+        decode_version_reply(payload, hardware=hardware)

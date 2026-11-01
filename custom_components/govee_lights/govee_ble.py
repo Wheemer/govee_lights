@@ -32,6 +32,7 @@ from .ble_packet_policy import (
     build_color_temp_packet,
     decode_device_brightness,
     decode_h617a_segment_status_record,
+    decode_version_reply,
     encode_ha_brightness,
 )
 from .const import DOMAIN
@@ -119,6 +120,8 @@ def _make_query_frame(cmd: int, payload: bytes = b"") -> bytes:
 BLE_QUERY_POWER = _make_query_frame(0x01)
 BLE_QUERY_BRIGHTNESS = _make_query_frame(0x04)
 BLE_QUERY_COLOR_MODE = _make_query_frame(0x05)
+BLE_QUERY_FIRMWARE = _make_query_frame(0x06)
+BLE_QUERY_HARDWARE = _make_query_frame(0x07, b"\x03")
 BLE_QUERY_SEGMENT_COLOR = _make_query_frame(0xA5, b"\x01")
 # A SEGMENT (0xA5) query with payload [n] answers with segment group n
 # (1-based): [n, then 3 x (brightness, r, g, b)] - i.e. segments 3n-2..3n.
@@ -448,6 +451,8 @@ class GoveeBLECoordinator(GoveeCoordinator):
         # Last-known device state (updated from BLE notifications)
         self.mode: int | None = None
         self.music_mode_id: int | None = None
+        self.firmware_version: str | None = None
+        self.hardware_version: str | None = None
         self.segment_colors = [None] * self.segment_count
         self.segment_brightness = [None] * self.segment_count
 
@@ -848,12 +853,17 @@ class GoveeBLECoordinator(GoveeCoordinator):
 
     @property
     def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
+        info = DeviceInfo(
             identifiers={(DOMAIN, self.address)},
             name=self.model,
             manufacturer="Govee",
             model=self.model,
         )
+        if self.firmware_version is not None:
+            info["sw_version"] = self.firmware_version
+        if self.hardware_version is not None:
+            info["hw_version"] = self.hardware_version
+        return info
 
     @callback
     def _handle_hass_stop(self, _event: Event) -> None:
@@ -872,6 +882,8 @@ class GoveeBLECoordinator(GoveeCoordinator):
             "rgb_color": self.rgb_color,
             "mode": self.mode,
             "music_mode_id": self.music_mode_id,
+            "firmware_version": self.firmware_version,
+            "hardware_version": self.hardware_version,
             "segment_colors": list(self.segment_colors),
             "segment_brightness": list(self.segment_brightness),
         }
@@ -1135,6 +1147,10 @@ class GoveeBLECoordinator(GoveeCoordinator):
                         self.color_temp_kelvin = None  # device is in plain RGB mode
             elif domain == GoveeBLE.LEDCommand.SEGMENT and len(payload) >= 5:
                 self._apply_segment_readback(payload)
+            elif domain == 0x06:
+                self.firmware_version = decode_version_reply(payload, hardware=False)
+            elif domain == 0x07:
+                self.hardware_version = decode_version_reply(payload, hardware=True)
             if not self._available:
                 self._available = True
             self.async_set_updated_data(self._state_snapshot())
@@ -1173,6 +1189,11 @@ class GoveeBLECoordinator(GoveeCoordinator):
             await w(BLE_UUID_CONTROL_CHARACTERISTIC, BLE_QUERY_POWER, response=False)
             await w(BLE_UUID_CONTROL_CHARACTERISTIC, BLE_QUERY_BRIGHTNESS, response=False)
             await w(BLE_UUID_CONTROL_CHARACTERISTIC, BLE_QUERY_COLOR_MODE, response=False)
+            if self.model == "H6125":
+                # H6125's app reads both versions before selecting a control
+                # grammar.  Collect them now; write gating is added separately.
+                await w(BLE_UUID_CONTROL_CHARACTERISTIC, BLE_QUERY_FIRMWARE, response=False)
+                await w(BLE_UUID_CONTROL_CHARACTERISTIC, BLE_QUERY_HARDWARE, response=False)
             if is_segmented_model(self.model):
                 # Segmented models may answer colour queries on SEGMENT (0xA5)
                 # rather than (or in addition to) COLOR (0x05); ported from

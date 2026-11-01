@@ -57,6 +57,28 @@ def decode_h617a_segment_status_record(record: bytes) -> tuple[int, tuple[int, i
     return decode_segment_brightness_percent(record[0]), (record[1], record[2], record[3])
 
 
+def decode_version_reply(payload: bytes, *, hardware: bool) -> str:
+    """Decode the shared AA 06/07 NUL-terminated version reply.
+
+    Hardware replies prefix the text with selector 03.  The H6125 APK reads
+    both fields before it chooses a revision-specific control grammar.
+    """
+    if hardware:
+        if not payload or payload[0] != 0x03:
+            raise ValueError("Hardware version reply is missing selector 03")
+        payload = payload[1:]
+    text = payload.split(b"\0", 1)[0]
+    if not text:
+        raise ValueError("Version reply is empty")
+    try:
+        value = text.decode("ascii")
+    except UnicodeDecodeError as err:
+        raise ValueError("Version reply is not ASCII") from err
+    if not all(part.isdecimal() and part for part in value.split(".")):
+        raise ValueError("Version reply is not a dotted numeric version")
+    return value
+
+
 def build_color_temp_packet(
     *,
     kelvin: int,

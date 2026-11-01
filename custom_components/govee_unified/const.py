@@ -738,6 +738,18 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
         whole_device_mask=1,
         connection_idle_timeout=3.0,
     ),
+    # H6008 is an APK-listed local RGB product. GoveeBleMqttServer explicitly
+    # groups its 0x0d static command and 0-100 brightness encoding with H613A.
+    "H6008": ModelProfile(
+        "H6008 LED Light",
+        support_quality=SupportQuality.SUPPORTED,
+        command_grammar="H600A",
+        command_operations=frozenset({"power", "brightness", "static"}),
+        outbound_transform=transform_legacy_0d_percent_brightness,
+        supports_rgb=True,
+        whole_device_mask=1,
+        connection_idle_timeout=3.0,
+    ),
     "H6052": ModelProfile(
         "H6052 LED Strip",
         support_quality=SupportQuality.SUPPORTED,

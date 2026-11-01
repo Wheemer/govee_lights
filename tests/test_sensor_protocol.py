@@ -61,6 +61,14 @@ def test_h5178_primary_and_remote_advertisements_preserve_their_roles() -> None:
     primary = protocol.parse_multi_sensor_advertisement("B51782BC8", {1: bytes.fromhex("010100002af7640003")})
     assert remote == protocol.MultiSensorAdvertisement("H5178", {"remote": protocol.ClimateAdvertisement("H5178", 1.0, 99.9, 100)})
     assert primary == protocol.MultiSensorAdvertisement("H5178", {"primary": protocol.ClimateAdvertisement("H5178", 1.0, 99.9, 100)})
+
+
+def test_h5055_requires_its_service_uuid_and_decodes_selected_probe_pair() -> None:
+    payload = bytes.fromhex("55006401201a00ffffffff201900ffffffff0000")
+    assert protocol.parse_six_probe_advertisement({44847: payload}) is None
+    assert protocol.parse_six_probe_advertisement({44847: payload}, ("00005550-0000-1000-8000-00805F9B34FB",)) == protocol.SixProbeAdvertisement(
+        "H5055", {1: 26.0}, 100
+    )
     assert protocol.parse_climate_advertisement("GV5179_6319", {1: bytes.fromhex("010103b31464")}) == protocol.ClimateAdvertisement(
         "H5179", 24.2, 45.2, 100
     )

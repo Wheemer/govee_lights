@@ -29,10 +29,11 @@ PASSIVE_CLIMATE_SENSOR_MODELS = _TEMP_HUMID_6 | _TEMP_HUMID_7 | _TEMP_HUMID_9 | 
 PASSIVE_PROBE_SENSOR_MODELS = frozenset({"H5181", "H5182", "H5183", "H5184", "H5185", "H5191", "H5198"})
 PASSIVE_ENVIRONMENT_SENSOR_MODELS = frozenset({"H5106", "H5140"})
 PASSIVE_DUAL_PROBE_SENSOR_MODELS = frozenset({"H5112"})
+PASSIVE_SIX_PROBE_SENSOR_MODELS = frozenset({"H5055"})
 PASSIVE_MULTI_SENSOR_MODELS = frozenset({"H5178"})
 PASSIVE_PRESENCE_SENSOR_MODELS = frozenset({"H5127"})
 PASSIVE_ENCRYPTED_EVENT_SENSOR_MODELS = frozenset({"H5121", "H5122", "H5123", "H5124", "H5125", "H5126", "H5130"})
-PASSIVE_SENSOR_MODELS = PASSIVE_CLIMATE_SENSOR_MODELS | PASSIVE_PROBE_SENSOR_MODELS | PASSIVE_ENVIRONMENT_SENSOR_MODELS | PASSIVE_DUAL_PROBE_SENSOR_MODELS | PASSIVE_MULTI_SENSOR_MODELS | PASSIVE_PRESENCE_SENSOR_MODELS | PASSIVE_ENCRYPTED_EVENT_SENSOR_MODELS
+PASSIVE_SENSOR_MODELS = PASSIVE_CLIMATE_SENSOR_MODELS | PASSIVE_PROBE_SENSOR_MODELS | PASSIVE_ENVIRONMENT_SENSOR_MODELS | PASSIVE_DUAL_PROBE_SENSOR_MODELS | PASSIVE_SIX_PROBE_SENSOR_MODELS | PASSIVE_MULTI_SENSOR_MODELS | PASSIVE_PRESENCE_SENSOR_MODELS | PASSIVE_ENCRYPTED_EVENT_SENSOR_MODELS
 _PROBE_COUNT = {"H5181": 1, "H5182": 2, "H5183": 1, "H5184": 4, "H5185": 2, "H5191": 1, "H5198": 4}
 _FOUR_PROBE_IDS = {1: (1, 2), 65: (1, 2), 129: (1, 2), 193: (1, 2), 2: (3, 4), 66: (3, 4), 130: (3, 4), 194: (3, 4)}
 
@@ -91,6 +92,15 @@ class MultiSensorAdvertisement:
 
     model: str
     readings: dict[str, ClimateAdvertisement]
+
+
+@dataclass(frozen=True, slots=True)
+class SixProbeAdvertisement:
+    """One H5055 rotating pair of directly-reported probe temperatures."""
+
+    model: str
+    probes_c: dict[int, float]
+    battery_pct: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,6 +290,22 @@ def parse_multi_sensor_advertisement(name: str | None, manufacturer_data: Mappin
     return None
 
 
+def parse_six_probe_advertisement(manufacturer_data: Mapping[int, bytes], service_uuids: tuple[str, ...] = ()) -> SixProbeAdvertisement | None:
+    """Decode the anonymous H5055 format only when its service UUID confirms it."""
+    if "00005550-0000-1000-8000-00805f9b34fb" not in {uuid.lower() for uuid in service_uuids}:
+        return None
+    pairs = {0: ((1, 0x01), (2, 0x02)), 64: ((3, 0x04), (4, 0x08)), 128: ((5, 0x10), (6, 0x20))}
+    for payload in manufacturer_data.values():
+        if len(payload) != 20 or (pair := pairs.get(payload[3] & 0xC0)) is None:
+            continue
+        first, _min_first, _max_first, _gap, second, _min_second, _max_second = struct.unpack("<hhhchhh", payload[5:18])
+        values = (first, second)
+        probes = {probe: float(values[index]) for index, (probe, flag) in enumerate(pair) if payload[3] & flag and values[index] >= 0}
+        if probes:
+            return SixProbeAdvertisement("H5055", probes, payload[2] & 0x7F)
+    return None
+
+
 def _crc16(data: bytes) -> int:
     crc = 0x1D0F
     for byte in data:
@@ -305,7 +331,7 @@ def parse_encrypted_event_advertisement(name: str | None, manufacturer_data: Map
     return None
 
 
-def parse_passive_sensor_advertisement(name: str | None, manufacturer_data: Mapping[int, bytes]) -> ClimateAdvertisement | ProbeAdvertisement | EnvironmentAdvertisement | PresenceAdvertisement | DualProbeAdvertisement | MultiSensorAdvertisement | EncryptedEventAdvertisement | None:
+def parse_passive_sensor_advertisement(name: str | None, manufacturer_data: Mapping[int, bytes], service_uuids: tuple[str, ...] = ()) -> ClimateAdvertisement | ProbeAdvertisement | EnvironmentAdvertisement | PresenceAdvertisement | DualProbeAdvertisement | SixProbeAdvertisement | MultiSensorAdvertisement | EncryptedEventAdvertisement | None:
     """Decode any currently supported advertisement-only Govee sensor family."""
     return (
         parse_climate_advertisement(name, manufacturer_data)
@@ -313,6 +339,7 @@ def parse_passive_sensor_advertisement(name: str | None, manufacturer_data: Mapp
         or parse_environment_advertisement(name, manufacturer_data)
         or parse_presence_advertisement(name, manufacturer_data)
         or parse_dual_probe_advertisement(name, manufacturer_data)
+        or parse_six_probe_advertisement(manufacturer_data, service_uuids)
         or parse_multi_sensor_advertisement(name, manufacturer_data)
         or parse_encrypted_event_advertisement(name, manufacturer_data)
     )

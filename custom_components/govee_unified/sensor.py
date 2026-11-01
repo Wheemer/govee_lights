@@ -24,7 +24,9 @@ from .sensor_protocol import (
     PASSIVE_ENCRYPTED_EVENT_SENSOR_MODELS,
     PASSIVE_MULTI_SENSOR_MODELS,
     PASSIVE_PROBE_SENSOR_MODELS,
+    PASSIVE_SIX_PROBE_SENSOR_MODELS,
     ProbeAdvertisement,
+    SixProbeAdvertisement,
     probe_count,
 )
 from .effect_contracts import CapabilityState
@@ -58,6 +60,8 @@ async def async_setup_entry(
             async_add_entities(entities)
         elif coordinator.model in PASSIVE_DUAL_PROBE_SENSOR_MODELS:
             async_add_entities([GoveePassiveDualProbeTemperatureSensor(coordinator, 1), GoveePassiveDualProbeTemperatureSensor(coordinator, 2), GoveePassiveDualProbeHumiditySensor(coordinator), GoveePassiveDualProbeBatterySensor(coordinator)])
+        elif coordinator.model in PASSIVE_SIX_PROBE_SENSOR_MODELS:
+            async_add_entities([GoveeSixProbeTemperatureSensor(coordinator, probe) for probe in range(1, 7)] + [GoveeSixProbeBatterySensor(coordinator)])
         elif coordinator.model in PASSIVE_MULTI_SENSOR_MODELS:
             async_add_entities([
                 GoveeMultiSensorTemperature(coordinator, role)
@@ -286,6 +290,38 @@ class GoveePassiveDualProbeBatterySensor(_GoveePassiveClimateSensor):
     def native_value(self) -> int | None:
         data = self.coordinator.data
         return data.battery_pct if isinstance(data, DualProbeAdvertisement) else None
+
+
+class GoveeSixProbeTemperatureSensor(GoveePassiveSensorEntity, SensorEntity):
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_native_unit_of_measurement = "°C"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: GoveePassiveSensorCoordinator, probe: int) -> None:
+        super().__init__(coordinator)
+        self._probe = probe
+        self._attr_name = f"Probe {probe} Temperature"
+        self._attr_unique_id = f"{coordinator.address.replace(':', '').lower()}_six_probe_{probe}_temperature"
+        self._attr_device_info = coordinator.device_info
+
+    @property
+    def native_value(self) -> float | None:
+        data = self.coordinator.data
+        return data.probes_c.get(self._probe) if isinstance(data, SixProbeAdvertisement) else None
+
+
+class GoveeSixProbeBatterySensor(_GoveePassiveClimateSensor):
+    _attr_name = "Battery"
+    _attr_device_class = SensorDeviceClass.BATTERY
+    _attr_native_unit_of_measurement = "%"
+
+    def __init__(self, coordinator: GoveePassiveSensorCoordinator) -> None:
+        super().__init__(coordinator, "six_probe_battery")
+
+    @property
+    def native_value(self) -> int | None:
+        data = self.coordinator.data
+        return data.battery_pct if isinstance(data, SixProbeAdvertisement) else None
 
 
 class _GoveeMultiSensorEntity(GoveePassiveSensorEntity, SensorEntity):

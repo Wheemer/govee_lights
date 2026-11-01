@@ -29,9 +29,10 @@ PASSIVE_CLIMATE_SENSOR_MODELS = _TEMP_HUMID_6 | _TEMP_HUMID_7 | _TEMP_HUMID_9 | 
 PASSIVE_PROBE_SENSOR_MODELS = frozenset({"H5181", "H5182", "H5183", "H5184", "H5185", "H5191", "H5198"})
 PASSIVE_ENVIRONMENT_SENSOR_MODELS = frozenset({"H5106", "H5140"})
 PASSIVE_DUAL_PROBE_SENSOR_MODELS = frozenset({"H5112"})
+PASSIVE_MULTI_SENSOR_MODELS = frozenset({"H5178"})
 PASSIVE_PRESENCE_SENSOR_MODELS = frozenset({"H5127"})
 PASSIVE_ENCRYPTED_EVENT_SENSOR_MODELS = frozenset({"H5121", "H5122", "H5123", "H5124", "H5125", "H5126", "H5130"})
-PASSIVE_SENSOR_MODELS = PASSIVE_CLIMATE_SENSOR_MODELS | PASSIVE_PROBE_SENSOR_MODELS | PASSIVE_ENVIRONMENT_SENSOR_MODELS | PASSIVE_DUAL_PROBE_SENSOR_MODELS | PASSIVE_PRESENCE_SENSOR_MODELS | PASSIVE_ENCRYPTED_EVENT_SENSOR_MODELS
+PASSIVE_SENSOR_MODELS = PASSIVE_CLIMATE_SENSOR_MODELS | PASSIVE_PROBE_SENSOR_MODELS | PASSIVE_ENVIRONMENT_SENSOR_MODELS | PASSIVE_DUAL_PROBE_SENSOR_MODELS | PASSIVE_MULTI_SENSOR_MODELS | PASSIVE_PRESENCE_SENSOR_MODELS | PASSIVE_ENCRYPTED_EVENT_SENSOR_MODELS
 _PROBE_COUNT = {"H5181": 1, "H5182": 2, "H5183": 1, "H5184": 4, "H5185": 2, "H5191": 1, "H5198": 4}
 _FOUR_PROBE_IDS = {1: (1, 2), 65: (1, 2), 129: (1, 2), 193: (1, 2), 2: (3, 4), 66: (3, 4), 130: (3, 4), 194: (3, 4)}
 
@@ -85,6 +86,14 @@ class DualProbeAdvertisement:
 
 
 @dataclass(frozen=True, slots=True)
+class MultiSensorAdvertisement:
+    """One H5178 primary/remote climate reading keyed by sensor role."""
+
+    model: str
+    readings: dict[str, ClimateAdvertisement]
+
+
+@dataclass(frozen=True, slots=True)
 class EncryptedEventAdvertisement:
     model: str
     battery_pct: int
@@ -103,6 +112,8 @@ def sensor_model_from_ble_name(name: str | None) -> str | None:
     # H5179 has both ``Govee_H5179`` and compact ``GV5179`` advertisements.
     if "5179" in normalized:
         return "H5179"
+    if "5178" in normalized:
+        return "H5178"
     for model in PASSIVE_ENCRYPTED_EVENT_SENSOR_MODELS:
         if model[1:] in normalized:
             return model
@@ -254,6 +265,21 @@ def parse_dual_probe_advertisement(name: str | None, manufacturer_data: Mapping[
     return None
 
 
+def parse_multi_sensor_advertisement(name: str | None, manufacturer_data: Mapping[int, bytes]) -> MultiSensorAdvertisement | None:
+    """Decode an H5178 primary/remote reading from its 9-byte broadcast."""
+    if sensor_model_from_ble_name(name) != "H5178":
+        return None
+    for payload in manufacturer_data.values():
+        if len(payload) != 9 or payload[2] not in {0, 1}:
+            continue
+        temperature, humidity, battery, error = _decode_packed_temp_humidity(payload[3:7])
+        if error or not -40 <= temperature <= 100 or not 0 <= humidity <= 100 or not 0 <= battery <= 100:
+            continue
+        role = "primary" if payload[2] == 0 else "remote"
+        return MultiSensorAdvertisement("H5178", {role: ClimateAdvertisement("H5178", temperature, humidity, battery)})
+    return None
+
+
 def _crc16(data: bytes) -> int:
     crc = 0x1D0F
     for byte in data:
@@ -279,7 +305,7 @@ def parse_encrypted_event_advertisement(name: str | None, manufacturer_data: Map
     return None
 
 
-def parse_passive_sensor_advertisement(name: str | None, manufacturer_data: Mapping[int, bytes]) -> ClimateAdvertisement | ProbeAdvertisement | EnvironmentAdvertisement | PresenceAdvertisement | DualProbeAdvertisement | EncryptedEventAdvertisement | None:
+def parse_passive_sensor_advertisement(name: str | None, manufacturer_data: Mapping[int, bytes]) -> ClimateAdvertisement | ProbeAdvertisement | EnvironmentAdvertisement | PresenceAdvertisement | DualProbeAdvertisement | MultiSensorAdvertisement | EncryptedEventAdvertisement | None:
     """Decode any currently supported advertisement-only Govee sensor family."""
     return (
         parse_climate_advertisement(name, manufacturer_data)
@@ -287,5 +313,6 @@ def parse_passive_sensor_advertisement(name: str | None, manufacturer_data: Mapp
         or parse_environment_advertisement(name, manufacturer_data)
         or parse_presence_advertisement(name, manufacturer_data)
         or parse_dual_probe_advertisement(name, manufacturer_data)
+        or parse_multi_sensor_advertisement(name, manufacturer_data)
         or parse_encrypted_event_advertisement(name, manufacturer_data)
     )

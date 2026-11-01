@@ -54,6 +54,13 @@ def test_h5179_decodes_its_distinct_and_compact_advertisement_layouts() -> None:
     assert protocol.parse_climate_advertisement("Govee_H5179_3CD5", {34817: bytes.fromhex("ec0001010a0aa40664")}) == protocol.ClimateAdvertisement(
         "H5179", 25.7, 17.0, 100
     )
+
+
+def test_h5178_primary_and_remote_advertisements_preserve_their_roles() -> None:
+    remote = protocol.parse_multi_sensor_advertisement("B51782BC8", {1: bytes.fromhex("010101002af7640003")})
+    primary = protocol.parse_multi_sensor_advertisement("B51782BC8", {1: bytes.fromhex("010100002af7640003")})
+    assert remote == protocol.MultiSensorAdvertisement("H5178", {"remote": protocol.ClimateAdvertisement("H5178", 1.0, 99.9, 100)})
+    assert primary == protocol.MultiSensorAdvertisement("H5178", {"primary": protocol.ClimateAdvertisement("H5178", 1.0, 99.9, 100)})
     assert protocol.parse_climate_advertisement("GV5179_6319", {1: bytes.fromhex("010103b31464")}) == protocol.ClimateAdvertisement(
         "H5179", 24.2, 45.2, 100
     )

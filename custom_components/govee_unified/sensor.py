@@ -50,7 +50,10 @@ async def async_setup_entry(
         elif coordinator.model in PASSIVE_ENCRYPTED_EVENT_SENSOR_MODELS:
             async_add_entities([GoveeEncryptedEventBatterySensor(coordinator)])
         elif coordinator.model in PASSIVE_PROBE_SENSOR_MODELS:
-            async_add_entities([GoveePassiveProbeTemperatureSensor(coordinator, probe) for probe in range(1, probe_count(coordinator.model) + 1)])
+            entities = [GoveePassiveProbeTemperatureSensor(coordinator, probe) for probe in range(1, probe_count(coordinator.model) + 1)]
+            if coordinator.model == "H5191":
+                entities.append(GoveePassiveAmbientTemperatureSensor(coordinator))
+            async_add_entities(entities)
         elif coordinator.model in PASSIVE_ENVIRONMENT_SENSOR_MODELS:
             entities = [GoveePassiveTemperatureSensor(coordinator), GoveePassiveHumiditySensor(coordinator)]
             if coordinator.model == "H5140":
@@ -244,6 +247,23 @@ class GoveePassiveProbeTemperatureSensor(GoveePassiveSensorEntity, SensorEntity)
     def native_value(self) -> float | None:
         data = self.coordinator.data
         return data.probes_c.get(self._probe) if isinstance(data, ProbeAdvertisement) else None
+
+
+class GoveePassiveAmbientTemperatureSensor(GoveePassiveSensorEntity, SensorEntity):
+    _attr_name = "Ambient Temperature"
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_native_unit_of_measurement = "°C"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: GoveePassiveSensorCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.address.replace(':', '').lower()}_ambient_temperature"
+        self._attr_device_info = coordinator.device_info
+
+    @property
+    def native_value(self) -> float | None:
+        data = self.coordinator.data
+        return data.ambient_c if isinstance(data, ProbeAdvertisement) else None
 
 
 class GoveePassiveDualProbeTemperatureSensor(GoveePassiveSensorEntity, SensorEntity):

@@ -54,6 +54,7 @@ class ProbeAdvertisement:
 
     model: str
     probes_c: dict[int, float]
+    ambient_c: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,7 +210,7 @@ def parse_probe_advertisement(name: str | None, manufacturer_data: Mapping[int, 
             first, _first_alarm, _gap, second, _second_alarm = struct.unpack(">hhhhh", payload[8:18])
             probes = {1: _probe_temperature(first), 2: _probe_temperature(second)}
         elif model == "H5191" and len(payload) == 20:
-            first, _alarm, _gap, _ambient = struct.unpack(">hhhh", payload[8:16])
+            first, _alarm, _gap, ambient = struct.unpack(">hhhh", payload[8:16])
             probes = {1: _probe_temperature(first)}
         elif model in {"H5184", "H5198"} and len(payload) in {17, 20}:
             ids = _FOUR_PROBE_IDS.get(payload[6])
@@ -221,7 +222,7 @@ def parse_probe_advertisement(name: str | None, manufacturer_data: Mapping[int, 
             continue
         valid = {probe: temperature for probe, temperature in probes.items() if temperature is not None}
         if valid:
-            return ProbeAdvertisement(model, valid)
+            return ProbeAdvertisement(model, valid, ambient / 100 if model == "H5191" else None)
     return None
 
 

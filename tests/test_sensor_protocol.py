@@ -42,6 +42,10 @@ def test_probe_sensor_batch_decodes_fixed_and_rotating_probe_layouts() -> None:
     assert protocol.parse_probe_advertisement("Govee_H5184_0001", {0x1B36: h5184}) == protocol.ProbeAdvertisement(
         "H5184", {3: 2.5, 4: 2.0}
     )
+    h5191 = bytes(8) + bytes.fromhex("00fa0000000008fc") + bytes(4)
+    assert protocol.parse_probe_advertisement("Govee_H5191_0001", {0xAC63: h5191}) == protocol.ProbeAdvertisement(
+        "H5191", {1: 2.5}, 23.0
+    )
 
 
 def test_environment_sensor_batch_decodes_co2_and_pm25() -> None:

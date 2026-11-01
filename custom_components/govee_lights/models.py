@@ -34,7 +34,14 @@ Per-model flags:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import StrEnum
 import re
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 # Fallback used when a segmented model does not declare a segment count. The
 # segment bitmask in the protocol covers 15 segments.
@@ -42,6 +49,30 @@ DEFAULT_SEGMENT_COUNT = 15
 
 # Largest addressable segment count supported by the mask protocol.
 MAX_SEGMENT_COUNT = 15
+
+
+class SupportQuality(StrEnum):
+    """How much wire-level evidence exists for a model profile."""
+
+    GENERIC = "generic"
+    EXPERIMENTAL = "experimental"
+    VERIFIED = "verified"
+
+
+@dataclass(frozen=True, slots=True)
+class ModelProfile:
+    """Model identity plus the evidence level for its local BLE behavior.
+
+    Feature flags remain the single command-policy input for now.  This
+    immutable wrapper is deliberately small: future BLE, LAN, cloud, and
+    appliance adapters can share a model identity without pretending that one
+    transport's packet grammar is valid on another transport.
+    """
+
+    model: str
+    support_quality: SupportQuality
+    family: str
+    features: Mapping[str, bool | int]
 
 # Govee model IDs look like ``H6006``, ``H617C`` or ``H61A0`` and appear
 # inside BLE advertisement names (e.g. ``Govee_H617C_2482``).
@@ -72,6 +103,13 @@ _DEVICE_FEATURES: dict[str, dict[str, bool | int]] = {
     "H6199": {"segmented": True, "brightness_percent": True},
 }
 
+# Profiles with a known wire family. A feature entry not present here remains
+# usable through the established generic path, but must not be advertised as a
+# verified per-model protocol implementation merely because its name matches.
+_MODEL_PROFILE_METADATA: Final[dict[str, tuple[SupportQuality, str]]] = {
+    "H613E": (SupportQuality.VERIFIED, "legacy_0d_bk"),
+}
+
 
 def detect_model(device_name: str) -> str | None:
     """Return the model ID embedded in an advertisement name, if any.
@@ -93,6 +131,32 @@ def _model_features(model: str) -> dict[str, bool | int]:
     """Return *model*'s raw feature entry from :data:`_DEVICE_FEATURES`
     (never raises; ``{}`` for an unlisted model)."""
     return _DEVICE_FEATURES.get(model, {})
+
+
+def get_model_profile(model: str) -> ModelProfile:
+    """Return the evidence-qualified local BLE profile for ``model``.
+
+    Unknown model names retain the integration's current generic behavior. The
+    profile makes that fallback explicit so callers can avoid presenting an
+    inferred command grammar as verified device support.
+    """
+
+    normalized = model.upper()
+    quality, family = _MODEL_PROFILE_METADATA.get(
+        normalized,
+        (
+            SupportQuality.EXPERIMENTAL
+            if normalized in _DEVICE_FEATURES
+            else SupportQuality.GENERIC,
+            "legacy_default",
+        ),
+    )
+    return ModelProfile(
+        model=normalized,
+        support_quality=quality,
+        family=family,
+        features=MappingProxyType(_model_features(normalized)),
+    )
 
 
 def is_segmented_model(model: str) -> bool:

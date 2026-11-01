@@ -89,6 +89,18 @@ class GoveeConfigFlow(ConfigFlow, domain=DOMAIN):
         return await self._async_finish_new_device(self._discovered)
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Choose a local transport before entering its established flow."""
+        if user_input is None:
+            return self.async_show_form(
+                step_id="user",
+                data_schema=vol.Schema({vol.Required("transport"): vol.In({"ble": "Bluetooth", "lan": "LAN (Wi-Fi)"})}),
+            )
+        if user_input["transport"] == "lan":
+            return await self.async_step_lan()
+        return await self.async_step_manual_ble()
+
+    async def async_step_manual_ble(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Run the imported manual Bluetooth setup flow."""
         if user_input is not None:
             try:
                 address = _normalize_manual_address(user_input[CONF_ADDRESS])
@@ -112,7 +124,15 @@ class GoveeConfigFlow(ConfigFlow, domain=DOMAIN):
             if selected_model == "H6102":
                 return await self.async_step_h6102_firmware()
             return await self._async_finish_new_device({CONF_MODEL: selected_model})
-        return self._show_user_form()
+        return self._show_user_form(step_id="manual_ble")
+
+    async def async_step_lan(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Delegate local Wi-Fi discovery to the bulk-ported LAN flow."""
+        from .lan_config_flow import GoveeConfigFlow as LanConfigFlow
+
+        if not hasattr(self, "_lan_discovered"):
+            self._lan_discovered = {}
+        return await LanConfigFlow.async_step_lan(self, user_input)
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         entry = self._get_reconfigure_entry()
@@ -234,10 +254,12 @@ class GoveeConfigFlow(ConfigFlow, domain=DOMAIN):
             options=options,
         )
 
-    def _show_user_form(self, *, errors: dict[str, str] | None = None) -> ConfigFlowResult:
+    def _show_user_form(
+        self, *, errors: dict[str, str] | None = None, step_id: str = "user"
+    ) -> ConfigFlowResult:
         models = list(MODEL_PROFILES.keys())
         return self.async_show_form(
-            step_id="user",
+            step_id=step_id,
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_ADDRESS): str,

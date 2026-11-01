@@ -25,7 +25,7 @@ from .const import (
 )
 from .lan_protocol import GoveeBLE
 from .lan_coordinator import GoveeLANCoordinator
-from .models import detect_model
+from .const import model_from_ble_name as detect_model
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry, ConfigFlowResult

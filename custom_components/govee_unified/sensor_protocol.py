@@ -13,6 +13,8 @@ import re
 import struct
 from collections.abc import Mapping
 
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
 
 _MODEL_RE = re.compile(r"H[0-9A-F]{4}", re.IGNORECASE)
 _PACKED_TEMP_HUMID_BATTERY = struct.Struct("<hHB")
@@ -28,7 +30,8 @@ PASSIVE_PROBE_SENSOR_MODELS = frozenset({"H5181", "H5182", "H5183", "H5184", "H5
 PASSIVE_ENVIRONMENT_SENSOR_MODELS = frozenset({"H5106", "H5140"})
 PASSIVE_DUAL_PROBE_SENSOR_MODELS = frozenset({"H5112"})
 PASSIVE_PRESENCE_SENSOR_MODELS = frozenset({"H5127"})
-PASSIVE_SENSOR_MODELS = PASSIVE_CLIMATE_SENSOR_MODELS | PASSIVE_PROBE_SENSOR_MODELS | PASSIVE_ENVIRONMENT_SENSOR_MODELS | PASSIVE_DUAL_PROBE_SENSOR_MODELS | PASSIVE_PRESENCE_SENSOR_MODELS
+PASSIVE_ENCRYPTED_EVENT_SENSOR_MODELS = frozenset({"H5121", "H5122", "H5123", "H5124", "H5125", "H5126", "H5130"})
+PASSIVE_SENSOR_MODELS = PASSIVE_CLIMATE_SENSOR_MODELS | PASSIVE_PROBE_SENSOR_MODELS | PASSIVE_ENVIRONMENT_SENSOR_MODELS | PASSIVE_DUAL_PROBE_SENSOR_MODELS | PASSIVE_PRESENCE_SENSOR_MODELS | PASSIVE_ENCRYPTED_EVENT_SENSOR_MODELS
 _PROBE_COUNT = {"H5181": 1, "H5182": 2, "H5183": 1, "H5184": 4, "H5185": 2, "H5191": 1, "H5198": 4}
 _FOUR_PROBE_IDS = {1: (1, 2), 65: (1, 2), 129: (1, 2), 193: (1, 2), 2: (3, 4), 66: (3, 4), 130: (3, 4), 194: (3, 4)}
 
@@ -81,6 +84,13 @@ class DualProbeAdvertisement:
     battery_pct: int
 
 
+@dataclass(frozen=True, slots=True)
+class EncryptedEventAdvertisement:
+    model: str
+    battery_pct: int
+    status: int
+
+
 def sensor_model_from_ble_name(name: str | None) -> str | None:
     """Return a supported passive-climate model encoded in a local name."""
     if not name:
@@ -90,6 +100,9 @@ def sensor_model_from_ble_name(name: str | None) -> str | None:
     # Unlike the other Govee names it omits the literal model-prefix H.
     if "5140" in normalized:
         return "H5140"
+    for model in PASSIVE_ENCRYPTED_EVENT_SENSOR_MODELS:
+        if model[1:] in normalized:
+            return model
     match = _MODEL_RE.search(normalized)
     if match is None:
         return None
@@ -235,7 +248,32 @@ def parse_dual_probe_advertisement(name: str | None, manufacturer_data: Mapping[
     return None
 
 
-def parse_passive_sensor_advertisement(name: str | None, manufacturer_data: Mapping[int, bytes]) -> ClimateAdvertisement | ProbeAdvertisement | EnvironmentAdvertisement | PresenceAdvertisement | DualProbeAdvertisement | None:
+def _crc16(data: bytes) -> int:
+    crc = 0x1D0F
+    for byte in data:
+        for bit in range(7, -1, -1):
+            crc = ((crc << 1) ^ (0x1021 if ((crc >> 15) ^ (byte >> bit)) & 1 else 0)) & 0xFFFF
+    return crc
+
+
+def parse_encrypted_event_advertisement(name: str | None, manufacturer_data: Mapping[int, bytes]) -> EncryptedEventAdvertisement | None:
+    """Decode the app/reference AES-ECB advertisement used by H512x/H5130."""
+    model = sensor_model_from_ble_name(name)
+    if model not in PASSIVE_ENCRYPTED_EVENT_SENSOR_MODELS:
+        return None
+    for payload in manufacturer_data.values():
+        if len(payload) != 24 or _crc16(payload[6:22]) != int.from_bytes(payload[22:24], "big"):
+            continue
+        key = payload[2:6] + bytes(12)
+        decryptor = Cipher(algorithms.AES(key[::-1]), modes.ECB()).decryptor()
+        decoded = (decryptor.update(payload[6:22][::-1]) + decryptor.finalize())[::-1]
+        decoded_model = {3: "H5121", 8: "H5122", 2: "H5123", 9: "H5124", 10: "H5125", 11: "H5126", 13: "H5130"}.get(decoded[2])
+        if decoded_model == model:
+            return EncryptedEventAdvertisement(model, decoded[4], decoded[5])
+    return None
+
+
+def parse_passive_sensor_advertisement(name: str | None, manufacturer_data: Mapping[int, bytes]) -> ClimateAdvertisement | ProbeAdvertisement | EnvironmentAdvertisement | PresenceAdvertisement | DualProbeAdvertisement | EncryptedEventAdvertisement | None:
     """Decode any currently supported advertisement-only Govee sensor family."""
     return (
         parse_climate_advertisement(name, manufacturer_data)
@@ -243,4 +281,5 @@ def parse_passive_sensor_advertisement(name: str | None, manufacturer_data: Mapp
         or parse_environment_advertisement(name, manufacturer_data)
         or parse_presence_advertisement(name, manufacturer_data)
         or parse_dual_probe_advertisement(name, manufacturer_data)
+        or parse_encrypted_event_advertisement(name, manufacturer_data)
     )

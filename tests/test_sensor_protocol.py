@@ -57,6 +57,12 @@ def test_h5127_presence_advertisement_is_strictly_payload_gated() -> None:
 
 def test_h5112_rotating_probe_packet_decodes_the_selected_probe() -> None:
     assert protocol.parse_dual_probe_advertisement("GVH5112_0001", {1: bytes.fromhex("00000341c2640041")}) == protocol.DualProbeAdvertisement("H5112", {1: 21.3}, 44.2, 100)
+
+
+def test_encrypted_h5123_window_fixture_is_authenticated_then_decoded() -> None:
+    payload = bytes.fromhex("3dec0000de4377d55e55f991496e36bdc67f8b2c27067497")
+    assert protocol.parse_encrypted_event_advertisement("GV51230B3D", {61320: payload}) == protocol.EncryptedEventAdvertisement("H5123", 100, 2)
+    assert protocol.parse_encrypted_event_advertisement("GV51230B3D", {61320: payload[:-2] + b"\x00\x00"}) is None
     assert protocol.parse_environment_advertisement("Govee_H5106_0001", {1: bytes.fromhex("0000014a3b00")}) == protocol.EnvironmentAdvertisement(
         "H5106", 2.1, 64.1, pm25_ug_m3=984
     )

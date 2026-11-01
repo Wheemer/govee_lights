@@ -26,6 +26,8 @@ from .const import (
     CONF_H6102_APP_FIRMWARE,
     CONF_H6102_APP_HARDWARE,
     CONF_H6102_PACT,
+    CONF_LAN_IP,
+    CONF_LAN_SKU,
     CONF_MODEL,
     CONF_PREFIX_EFFECT_NAMES,
     CONF_REGISTER_EFFECT_STUDIO,
@@ -49,12 +51,14 @@ from .coordinator_dreamview import (
 )
 from .editor import EDITOR_PANEL_PATH, async_register_editor_panel, editor_url
 from .effect_setup import async_setup_effects, get_effect_backend
+from .lan_coordinator import GoveeLANCoordinator
 from .light_services import async_register_light_services
 
 type GoveeBLEConfigEntry = ConfigEntry[GoveeBLECoordinator]
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-PLATFORMS = [Platform.LIGHT, Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH]
+BLE_PLATFORMS = [Platform.LIGHT, Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH]
+LAN_PLATFORMS = [Platform.BINARY_SENSOR, Platform.LIGHT]
 _LEGACY_ENTITY_SUFFIXES = {
     "_active_mode",
     "_blank_screen",
@@ -251,6 +255,14 @@ def _maybe_flag_music_mode_replaced(hass: HomeAssistant, entry: GoveeBLEConfigEn
 
 async def async_setup_entry(hass: HomeAssistant, entry: GoveeBLEConfigEntry) -> bool:
     assert entry.unique_id is not None
+    if (lan_ip := entry.data.get(CONF_LAN_IP)) is not None:
+        sku = entry.data.get(CONF_LAN_SKU)
+        if not isinstance(lan_ip, str) or not isinstance(sku, str):
+            return False
+        entry.runtime_data = await GoveeLANCoordinator.async_create(hass, lan_ip, sku, entry.unique_id)
+        await entry.runtime_data.async_setup()
+        await hass.config_entries.async_forward_entry_setups(entry, LAN_PLATFORMS)
+        return True
     if await async_guard_dreamview_entry(hass, entry):
         raise ConfigEntryNotReady("Config entry is claimed by a DreamView sync centre")
     raw_model = entry.data.get(CONF_MODEL)
@@ -352,16 +364,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: GoveeBLEConfigEntry) -> 
         entry.async_on_unload(unsubscribe_effect_observation)
     _maybe_flag_music_mode_replaced(hass, entry)
     await _async_cleanup_legacy_entities(hass, entry)
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await hass.config_entries.async_forward_entry_setups(entry, BLE_PLATFORMS)
     await _async_update_editor_panel(hass)
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: GoveeBLEConfigEntry) -> bool:
+    if entry.data.get(CONF_LAN_IP) is not None:
+        if unload_ok := await hass.config_entries.async_unload_platforms(entry, LAN_PLATFORMS):
+            entry.runtime_data.cleanup()
+        return unload_ok
     effect_backend = get_effect_backend(hass)
     if effect_backend is not None:
         await effect_backend.preview.async_unload_device(entry.entry_id)
-    if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+    if unload_ok := await hass.config_entries.async_unload_platforms(entry, BLE_PLATFORMS):
         if (coordinator := getattr(entry, "runtime_data", None)) is not None:
             await coordinator.disconnect()
         await _async_update_editor_panel(hass)

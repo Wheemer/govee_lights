@@ -1,0 +1,175 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+
+from .const import DOMAIN
+
+if TYPE_CHECKING:
+    import logging
+
+    from homeassistant.components.light.const import ColorMode
+    from homeassistant.core import HomeAssistant
+
+
+class GoveeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
+    """Base coordinator shared by GoveeBLECoordinator and GoveeLANCoordinator."""
+
+    def __init__(self, hass: HomeAssistant, logger: logging.Logger, name: str) -> None:
+        super().__init__(hass, logger, name=name, update_interval=None)
+        self._available: bool = False
+        self._effect_list: list[str] | None = None
+        self._effect_map: dict[str, int] | None = None
+        self._scenes_data: list[dict[str, Any]] | None = None
+        # Shared device state (updated from transport callbacks)
+        self.is_on: bool = False
+        self.brightness_raw: int = 0
+        self.rgb_color: tuple[int, int, int] | None = None
+        self.color_temp_kelvin: int | None = None
+        # Per-segment colours (index 0 = segment 1), None = unknown
+        self.segment_colors: list[tuple[int, int, int] | None] = []
+        self.segment_brightness: list[int | None] = []
+        # How many segment entities currently want per-segment readback.
+        # Transports that can read segments back (BLE) only spend the extra
+        # query frames while this is non-zero.
+        self.segment_state_listeners: int = 0
+
+    @property
+    def available(self) -> bool:
+        return self._available
+
+    @property
+    def effect_list(self) -> list[str] | None:
+        return self._effect_list
+
+    @property
+    def effect_map(self) -> dict[str, int] | None:
+        return self._effect_map
+
+    @property
+    def scenes_data(self) -> list[dict[str, Any]] | None:
+        return self._scenes_data
+
+    # ── Interface (implemented by subclasses) ──────────────────────────────
+
+    @property
+    def unique_device_id(self) -> str:
+        raise NotImplementedError
+
+    @property
+    def device_key(self) -> str:
+        raise NotImplementedError
+
+    @property
+    def supported_color_modes(self) -> set[ColorMode]:
+        raise NotImplementedError
+
+    @property
+    def min_color_temp_kelvin(self) -> int | None:
+        raise NotImplementedError
+
+    @property
+    def max_color_temp_kelvin(self) -> int | None:
+        raise NotImplementedError
+
+    @property
+    def supports_music_modes(self) -> bool:
+        raise NotImplementedError
+
+    @property
+    def setup_in_background(self) -> bool:
+        raise NotImplementedError
+
+    @property
+    def brightness(self) -> int:
+        raise NotImplementedError
+
+    @property
+    def current_rgb_color(self) -> tuple[int, int, int] | None:
+        raise NotImplementedError
+
+    @property
+    def inferred_effect(self) -> str | None:
+        raise NotImplementedError
+
+    @property
+    def segment_count(self) -> int:
+        """Individually addressable segments; 0 = no segment control."""
+        return 0
+
+    @property
+    def segment_readback(self) -> bool:
+        """Whether the device reports per-segment colours back to us."""
+        return False
+
+    @property
+    def supports_native_segment_brightness(self) -> bool:
+        """Whether this transport/model supports individual brightness writes."""
+        return False
+
+    def cleanup(self) -> None:
+        """Override in subclass to release resources."""
+
+    async def async_setup(self) -> None:
+        raise NotImplementedError
+
+    async def async_load_effects(self, config_dir: str) -> None:
+        raise NotImplementedError
+
+    async def async_turn_on(self) -> None:
+        raise NotImplementedError
+
+    async def async_turn_off(self) -> None:
+        raise NotImplementedError
+
+    async def async_set_brightness(self, brightness: int) -> None:
+        raise NotImplementedError
+
+    async def async_set_rgb_color(self, r: int, g: int, b: int, *, verify: bool = True) -> None:
+        """Set the colour. ``verify=False`` skips the post-command state
+        query some transports (BLE) otherwise schedule - needed for fade
+        frames, where a query per intermediate frame would flood the
+        device (see fade.py). Transports without that concept (LAN) accept
+        and ignore the flag."""
+        raise NotImplementedError
+
+    async def async_set_color_temp(self, kelvin: int, *, verify: bool = True) -> None:
+        """Set colour temperature. See ``async_set_rgb_color`` re ``verify``."""
+        raise NotImplementedError
+
+    async def async_set_segment_colors(
+        self, colors: dict[int, tuple[int, int, int]], *, verify: bool = True
+    ) -> None:
+        """Paint individual segments ({0-based index: rgb})."""
+        raise NotImplementedError
+
+    async def async_set_segment_brightness(
+        self, brightness: dict[int, int], *, verify: bool = True
+    ) -> None:
+        """Set native brightness for 0-based segments where supported."""
+        raise NotImplementedError
+
+    async def async_apply_effect(self, effect: str) -> None:
+        raise NotImplementedError
+
+    # ── Repair issues (shared by BLE/LAN subclasses) ────────────────────────
+
+    def _raise_repair_issue(
+        self, issue_key: str, translation_key: str, **placeholders: str
+    ) -> None:
+        """Create (or update) a Repairs issue for this device."""
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_key,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=translation_key,
+            translation_placeholders=placeholders,
+        )
+
+    def _clear_repair_issue(self, issue_key: str) -> None:
+        """Delete a previously raised Repairs issue, if any."""
+        ir.async_delete_issue(self.hass, DOMAIN, issue_key)

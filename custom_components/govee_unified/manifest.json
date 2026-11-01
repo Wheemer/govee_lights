@@ -549,7 +549,8 @@
     "bleak_retry_connector"
   ],
   "requirements": [
-    "kaitaistruct==0.11"
+    "kaitaistruct==0.11",
+    "govee-local-api>=3.1.0"
   ],
   "version": "7.30.1"
 }

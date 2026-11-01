@@ -29,6 +29,13 @@ from .music_semantics import (
 )
 
 DOMAIN = "govee_unified"
+CONF_LAN_IP = "lan_ip"
+CONF_LAN_DEVICE_ID = "lan_device_id"
+CONF_LAN_SKU = "lan_sku"
+CONF_FADE = "fade"
+CONF_FADE_ON = "fade_on"
+CONF_FADE_OFF = "fade_off"
+DEFAULT_FADE: float = 0.0
 CONF_MODEL = "model"
 CONF_H6102_APP_FIRMWARE = "h6102_app_firmware"
 CONF_H6102_APP_HARDWARE = "h6102_app_hardware"

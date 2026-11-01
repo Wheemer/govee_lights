@@ -209,6 +209,11 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
+    if "lan_ip" in config_entry.data:
+        from .lan_light import async_setup_entry as async_setup_lan_entry
+
+        await async_setup_lan_entry(hass, config_entry, async_add_entities)
+        return
     async_add_entities(
         [
             GoveeBLELight(

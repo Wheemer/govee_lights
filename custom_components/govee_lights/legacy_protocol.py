@@ -80,3 +80,12 @@ def build_h617a_segment_color_temp_packet(
             mask >> 8,
         ],
     )
+
+
+def build_h617a_segment_brightness_packet(percent: int, mask: int) -> bytes:
+    """Build the H617A-family native per-segment brightness command."""
+    if not 1 <= percent <= 100:
+        raise ValueError("Segment brightness must be from 1 to 100")
+    if not 0 <= mask <= 0x7FFF:
+        raise ValueError("Segment mask must fit the 15-bit legacy protocol")
+    return build_single_packet(0x05, [0x15, 0x02, percent, mask & 0xFF, mask >> 8])

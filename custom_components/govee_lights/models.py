@@ -106,6 +106,7 @@ _DEVICE_FEATURES: dict[str, dict[str, bool | int]] = {
         "colour_d": True,
         "h617a_segment_grammar": True,
         "brightness_wire_range": (20, 254),
+        "segment_brightness": True,
     },
     "H613A": {"brightness_percent": True},
     "H613B": {"colour_d": True},
@@ -294,3 +295,8 @@ def get_segment_count(model: str) -> int:
 def get_segment_readback_group_size(model: str) -> int:
     """Return segment records in one 0xA5 status response for *model*."""
     return int(_model_features(model).get("segment_readback_group_size", 3))
+
+
+def supports_segment_brightness(model: str) -> bool:
+    """Return whether the model has a native per-segment brightness command."""
+    return bool(_model_features(model).get("segment_brightness", False))

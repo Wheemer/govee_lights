@@ -345,10 +345,19 @@ class GoveeLight(LightEntity, RestoreEntity):
             raise ServiceValidationError(
                 f"{self._device_label} has segments 1-{count}; got {invalid}"
             )
-        color = _scale(rgb_color, 255 if brightness is None else brightness)
+        native_brightness = (
+            brightness is not None and brightness > 0 and hub.supports_native_segment_brightness
+        )
+        color = (
+            rgb_color
+            if native_brightness
+            else _scale(rgb_color, 255 if brightness is None else brightness)
+        )
         if not hub.is_on:
             await hub.async_turn_on()
         await hub.async_set_segment_colors({s - 1: color for s in segments})
+        if native_brightness:
+            await hub.async_set_segment_brightness({s - 1: brightness for s in segments})
         self._attr_effect = EFFECT_OFF
         self.async_write_ha_state()
 
@@ -573,7 +582,11 @@ class GoveeSegmentLight(LightEntity):
         hub = self._coordinator
         if not hub.is_on:
             await hub.async_turn_on()
-        await hub.async_set_segment_colors({self._index: _scale(tuple(base), brightness)})
+        if brightness > 0 and hub.supports_native_segment_brightness:
+            await hub.async_set_segment_colors({self._index: tuple(base)})
+            await hub.async_set_segment_brightness({self._index: brightness})
+        else:
+            await hub.async_set_segment_colors({self._index: _scale(tuple(base), brightness)})
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self._coordinator.async_set_segment_colors({self._index: (0, 0, 0)})

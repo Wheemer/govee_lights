@@ -37,6 +37,7 @@ from .const import DOMAIN
 from .coordinator import GoveeCoordinator
 from .govee import GoveeHelper
 from .legacy_protocol import (
+    build_h617a_segment_brightness_packet,
     build_h617a_segment_color_packet,
     build_h617a_segment_color_temp_packet,
 )
@@ -54,6 +55,7 @@ from .models import (
     get_segment_readback_group_size,
     has_advert_state,
     is_segmented_model,
+    supports_segment_brightness,
     uses_color_command_ack_state,
     uses_color_write_with_response,
     uses_colour_d_mode,
@@ -506,6 +508,10 @@ class GoveeBLECoordinator(GoveeCoordinator):
         return self.segment_count > 0
 
     @property
+    def supports_native_segment_brightness(self) -> bool:
+        return supports_segment_brightness(self.model)
+
+    @property
     def setup_in_background(self) -> bool:
         return True
 
@@ -773,6 +779,28 @@ class GoveeBLECoordinator(GoveeCoordinator):
             self.rgb_color = colors[0]
         await self.send_commands(packets, verify=verify)
         self.async_set_updated_data(self._state_snapshot())
+
+    async def async_set_segment_brightness(
+        self, brightness: dict[int, int], *, verify: bool = True
+    ) -> None:
+        """Apply H6102's native per-segment brightness packets."""
+        if not self.supports_native_segment_brightness:
+            raise HomeAssistantError(f"Govee {self.model} has no native segment brightness")
+        grouped: dict[int, int] = {}
+        for index, value in brightness.items():
+            if not 0 <= index < self.segment_count:
+                raise HomeAssistantError(
+                    f"Segment {index + 1} out of range for Govee {self.model} (1-{self.segment_count})"
+                )
+            if not 1 <= value <= 255:
+                raise HomeAssistantError("Segment brightness must be from 1 to 255")
+            percent = max(1, round(value * 100 / 255))
+            grouped[percent] = grouped.get(percent, 0) | (1 << index)
+        packets = [
+            build_h617a_segment_brightness_packet(percent, mask)
+            for percent, mask in grouped.items()
+        ]
+        await self.send_commands(packets, verify=verify)
 
     async def async_set_effect(self, ptreal_cmds: list[str]) -> None:
         """Apply a ptReal scene effect and power the device on."""

@@ -103,6 +103,11 @@ class GoveeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Whether the device reports per-segment colours back to us."""
         return False
 
+    @property
+    def supports_native_segment_brightness(self) -> bool:
+        """Whether this transport/model supports individual brightness writes."""
+        return False
+
     def cleanup(self) -> None:
         """Override in subclass to release resources."""
 
@@ -139,6 +144,12 @@ class GoveeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Paint individual segments ({0-based index: rgb})."""
         raise NotImplementedError
 
+    async def async_set_segment_brightness(
+        self, brightness: dict[int, int], *, verify: bool = True
+    ) -> None:
+        """Set native brightness for 0-based segments where supported."""
+        raise NotImplementedError
+
     async def async_apply_effect(self, effect: str) -> None:
         raise NotImplementedError
 
@@ -161,4 +172,3 @@ class GoveeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _clear_repair_issue(self, issue_key: str) -> None:
         """Delete a previously raised Repairs issue, if any."""
         ir.async_delete_issue(self.hass, DOMAIN, issue_key)
-

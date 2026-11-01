@@ -17,6 +17,7 @@ SupportQuality = _MODELS.SupportQuality
 get_model_profile = _MODELS.get_model_profile
 get_segment_readback_group_size = _MODELS.get_segment_readback_group_size
 get_brightness_wire_range = _MODELS.get_brightness_wire_range
+supports_segment_brightness = _MODELS.supports_segment_brightness
 uses_h617a_segment_grammar = _MODELS.uses_h617a_segment_grammar
 
 
@@ -96,6 +97,8 @@ def test_legacy_h617a_readback_group_size_remains_three() -> None:
 def test_h6102_declares_its_documented_brightness_register_range() -> None:
     assert get_brightness_wire_range("H6102") == (20, 254)
     assert get_brightness_wire_range("H617A") is None
+    assert supports_segment_brightness("H6102")
+    assert not supports_segment_brightness("H617A")
 
 
 def test_unlisted_model_remains_a_generic_fallback() -> None:

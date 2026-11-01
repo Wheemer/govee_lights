@@ -16,6 +16,7 @@ _SPEC.loader.exec_module(_PROTOCOL)
 build_single_packet = _PROTOCOL.build_single_packet
 build_h617a_segment_color_packet = _PROTOCOL.build_h617a_segment_color_packet
 build_h617a_segment_color_temp_packet = _PROTOCOL.build_h617a_segment_color_temp_packet
+build_h617a_segment_brightness_packet = _PROTOCOL.build_h617a_segment_brightness_packet
 sign_payload = _PROTOCOL.sign_payload
 
 
@@ -57,6 +58,13 @@ def test_h617a_segment_white_frame_matches_upstream_packet_fixture() -> None:
     frame = build_h617a_segment_color_temp_packet(4000, 255, 213, 161, 0x7FFF)
 
     assert frame.hex() == "33051501ffffff0fa0ffd5a1ff7f000000000079"
+    assert sign_payload(frame[:-1]) == frame[-1]
+
+
+def test_h6102_segment_brightness_frame_matches_upstream_h617a_fixture() -> None:
+    frame = build_h617a_segment_brightness_packet(50, 0x7FFF)
+
+    assert frame.hex() == "3305150232ff7f00000000000000000000000093"
     assert sign_payload(frame[:-1]) == frame[-1]
 
 

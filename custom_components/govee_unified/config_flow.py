@@ -58,6 +58,7 @@ from .sensor_protocol import PASSIVE_SENSOR_MODELS, sensor_model_from_ble_name
 _LOGGER = logging.getLogger(__name__)
 
 _MANUAL_ADDRESS_PATTERN = re.compile(r"^[0-9A-F]{12}$")
+_H5055_SERVICE_UUID = "00005550-0000-1000-8000-00805f9b34fb"
 
 
 def _normalize_manual_address(address: str) -> str:
@@ -79,7 +80,15 @@ class GoveeConfigFlow(ConfigFlow, domain=DOMAIN):
         return GoveeOptionsFlow()
 
     async def async_step_bluetooth(self, discovery_info: BluetoothServiceInfo) -> ConfigFlowResult:
-        model = model_from_ble_name(discovery_info.name) or sensor_model_from_ble_name(discovery_info.name)
+        model = (
+            model_from_ble_name(discovery_info.name)
+            or sensor_model_from_ble_name(discovery_info.name)
+            or (
+                "H5055"
+                if _H5055_SERVICE_UUID in {uuid.lower() for uuid in discovery_info.service_uuids}
+                else None
+            )
+        )
         if model is None:
             return self.async_abort(reason="not_supported")
         await self.async_set_unique_id(discovery_info.address.strip().upper())

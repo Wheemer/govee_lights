@@ -30,6 +30,7 @@ class GoveeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.color_temp_kelvin: int | None = None
         # Per-segment colours (index 0 = segment 1), None = unknown
         self.segment_colors: list[tuple[int, int, int] | None] = []
+        self.segment_brightness: list[int | None] = []
         # How many segment entities currently want per-segment readback.
         # Transports that can read segments back (BLE) only spend the extra
         # query frames while this is non-zero.

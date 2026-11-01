@@ -553,6 +553,9 @@ class GoveeSegmentLight(LightEntity):
 
     @property
     def brightness(self) -> int | None:
+        native = self._coordinator.segment_brightness[self._index]
+        if native is not None:
+            return native
         color = self._color
         return max(color) if color else None
 

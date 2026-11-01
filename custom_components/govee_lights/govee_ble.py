@@ -448,6 +448,7 @@ class GoveeBLECoordinator(GoveeCoordinator):
         self.mode: int | None = None
         self.music_mode_id: int | None = None
         self.segment_colors = [None] * self.segment_count
+        self.segment_brightness = [None] * self.segment_count
 
         self._issue_key = f"ble_needs_pairing_{address.replace(':', '')}"
 
@@ -801,6 +802,9 @@ class GoveeBLECoordinator(GoveeCoordinator):
             for percent, mask in grouped.items()
         ]
         await self.send_commands(packets, verify=verify)
+        for index, value in brightness.items():
+            self.segment_brightness[index] = value
+        self.async_set_updated_data(self._state_snapshot())
 
     async def async_set_effect(self, ptreal_cmds: list[str]) -> None:
         """Apply a ptReal scene effect and power the device on."""
@@ -868,6 +872,7 @@ class GoveeBLECoordinator(GoveeCoordinator):
             "mode": self.mode,
             "music_mode_id": self.music_mode_id,
             "segment_colors": list(self.segment_colors),
+            "segment_brightness": list(self.segment_brightness),
         }
 
     async def _ensure_connected(self, *, query_state: bool = True) -> BleakClient:

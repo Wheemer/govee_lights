@@ -48,6 +48,11 @@ def test_environment_sensor_batch_decodes_co2_and_pm25() -> None:
     assert protocol.parse_environment_advertisement("GV5140303A", {1: bytes.fromhex("0101033dee023e00")}) == protocol.EnvironmentAdvertisement(
         "H5140", 21.2, 46.2, co2_ppm=574
     )
+
+
+def test_h5127_presence_advertisement_is_strictly_payload_gated() -> None:
+    assert protocol.parse_presence_advertisement("Govee_H5127_0001", {0x8843: bytes.fromhex("ec0002010111")}) == protocol.PresenceAdvertisement("H5127", True, True)
+    assert protocol.parse_presence_advertisement("Govee_H5127_0001", {0x8843: bytes.fromhex("ec0002010010")}) == protocol.PresenceAdvertisement("H5127", False, False)
     assert protocol.parse_environment_advertisement("Govee_H5106_0001", {1: bytes.fromhex("0000014a3b00")}) == protocol.EnvironmentAdvertisement(
         "H5106", 2.1, 64.1, pm25_ug_m3=984
     )

@@ -26,7 +26,8 @@ _TEMP_HUMID_PACKED = frozenset(
 PASSIVE_CLIMATE_SENSOR_MODELS = _TEMP_HUMID_6 | _TEMP_HUMID_7 | _TEMP_HUMID_9 | _TEMP_HUMID_PACKED
 PASSIVE_PROBE_SENSOR_MODELS = frozenset({"H5181", "H5182", "H5183", "H5184", "H5185", "H5191", "H5198"})
 PASSIVE_ENVIRONMENT_SENSOR_MODELS = frozenset({"H5106", "H5140"})
-PASSIVE_SENSOR_MODELS = PASSIVE_CLIMATE_SENSOR_MODELS | PASSIVE_PROBE_SENSOR_MODELS | PASSIVE_ENVIRONMENT_SENSOR_MODELS
+PASSIVE_PRESENCE_SENSOR_MODELS = frozenset({"H5127"})
+PASSIVE_SENSOR_MODELS = PASSIVE_CLIMATE_SENSOR_MODELS | PASSIVE_PROBE_SENSOR_MODELS | PASSIVE_ENVIRONMENT_SENSOR_MODELS | PASSIVE_PRESENCE_SENSOR_MODELS
 _PROBE_COUNT = {"H5181": 1, "H5182": 2, "H5183": 1, "H5184": 4, "H5185": 2, "H5191": 1, "H5198": 4}
 _FOUR_PROBE_IDS = {1: (1, 2), 65: (1, 2), 129: (1, 2), 193: (1, 2), 2: (3, 4), 66: (3, 4), 130: (3, 4), 194: (3, 4)}
 
@@ -58,6 +59,15 @@ class EnvironmentAdvertisement:
     humidity_pct: float
     co2_ppm: int | None = None
     pm25_ug_m3: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PresenceAdvertisement:
+    """Occupancy and motion values from the H5127 passive advertisement."""
+
+    model: str
+    occupied: bool
+    motion: bool
 
 
 def sensor_model_from_ble_name(name: str | None) -> str | None:
@@ -188,10 +198,21 @@ def parse_environment_advertisement(name: str | None, manufacturer_data: Mapping
     return None
 
 
-def parse_passive_sensor_advertisement(name: str | None, manufacturer_data: Mapping[int, bytes]) -> ClimateAdvertisement | ProbeAdvertisement | EnvironmentAdvertisement | None:
+def parse_presence_advertisement(name: str | None, manufacturer_data: Mapping[int, bytes]) -> PresenceAdvertisement | None:
+    model = sensor_model_from_ble_name(name)
+    if model != "H5127":
+        return None
+    for payload in manufacturer_data.values():
+        if len(payload) == 6 and payload.startswith((b"\xec\x00\x01\x01", b"\xec\x00\x02\x01")):
+            return PresenceAdvertisement(model, payload[4] == 1, payload[5] == 17)
+    return None
+
+
+def parse_passive_sensor_advertisement(name: str | None, manufacturer_data: Mapping[int, bytes]) -> ClimateAdvertisement | ProbeAdvertisement | EnvironmentAdvertisement | PresenceAdvertisement | None:
     """Decode any currently supported advertisement-only Govee sensor family."""
     return (
         parse_climate_advertisement(name, manufacturer_data)
         or parse_probe_advertisement(name, manufacturer_data)
         or parse_environment_advertisement(name, manufacturer_data)
+        or parse_presence_advertisement(name, manufacturer_data)
     )

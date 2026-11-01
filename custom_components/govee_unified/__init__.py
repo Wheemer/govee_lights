@@ -63,7 +63,7 @@ type GoveeBLEConfigEntry = ConfigEntry[GoveeBLECoordinator | GoveeApplianceCoord
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 BLE_PLATFORMS = [Platform.LIGHT, Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH]
 LAN_PLATFORMS = [Platform.BINARY_SENSOR, Platform.LIGHT]
-PASSIVE_SENSOR_PLATFORMS = [Platform.SENSOR]
+PASSIVE_SENSOR_PLATFORMS = [Platform.BINARY_SENSOR, Platform.SENSOR]
 _LEGACY_ENTITY_SUFFIXES = {
     "_active_mode",
     "_blank_screen",

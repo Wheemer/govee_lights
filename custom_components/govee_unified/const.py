@@ -1546,6 +1546,16 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
         boolean_controls=frozenset({"gradual"}),
         effect_readback="diy_code_only",
     ),
+    # APK sku_ic.json identifies H618C as a 30-IC RGBIC strip. Its local
+    # component declaration and portable BLE implementation put it in the
+    # H617A command family: fifteen addressable segments and percent level.
+    "H618C": replace(
+        _H617A_PROFILE,
+        name="H618C LED Strip",
+        status_grammar="H617C",
+        physical_ic_count=30,
+        scene_catalogue_sku="H618C",
+    ),
     "H617F": replace(
         _H617A_PROFILE,
         name="H617F LED Strip",

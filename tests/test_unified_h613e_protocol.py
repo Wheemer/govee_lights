@@ -73,3 +73,18 @@ def test_ported_legacy_rgb_families_preserve_their_documented_wire_shapes() -> N
         assert profile.outbound_transform is not None
         assert profile.outbound_transform(rgb).hex() == rgb_hex
         assert profile.outbound_transform(brightness).hex() == brightness_hex
+
+
+def test_h618c_basic_frames_match_the_documented_h617a_rgbic_family() -> None:
+    """H618C shares the H617A write grammar, not the generic RGB command."""
+    h617a = MODEL_PROFILES["H617A"]
+    h618c = MODEL_PROFILES["H618C"]
+
+    for builder, args in (
+        (build_color_rgb, (10, 20, 30)),
+        (build_brightness, (50,)),
+    ):
+        first = builder(*args, "H617A", profile=h617a)
+        second = builder(*args, "H618C", profile=h618c)
+        require_profile_packet(second, h618c)
+        assert second == first

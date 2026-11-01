@@ -164,6 +164,9 @@ class ModelProfile:
     # A small number of legacy devices require GATT write acknowledgement for
     # static control; this is independent of protocol command acknowledgements.
     write_with_response: bool = False
+    # None uses the shared write characteristic. H615B uses the documented
+    # alternate control characteristic while retaining the same frame grammar.
+    write_characteristic_uuid: str | None = None
     # Some legacy control services reject their first write until descriptors
     # have settled after connection. Zero keeps the standard immediate path.
     connection_settle_seconds: float = 0.0
@@ -2056,6 +2059,18 @@ _HOMEBRIDGE_DEFAULT_BLE_RGB_MODELS = (
     "H8840", "H8841",
 )
 _LEGACY_GENERIC_RGB_MODELS += _HOMEBRIDGE_DEFAULT_BLE_RGB_MODELS
+
+MODEL_PROFILES["H615B"] = ModelProfile(
+    "H615B Govee Light",
+    support_quality=SupportQuality.SUPPORTED,
+    command_grammar="H617A",
+    command_operations=frozenset({"power", "brightness", "static"}),
+    outbound_transform=transform_legacy_generic_rgb_raw_brightness,
+    supports_rgb=True,
+    whole_device_mask=0x7FFF,
+    write_characteristic_uuid="00010203-0405-0607-0809-0a0b0c0d2b10",
+    connection_idle_timeout=3.0,
+)
 
 MODEL_PROFILES.update(
     {

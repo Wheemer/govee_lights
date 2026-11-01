@@ -101,7 +101,7 @@ from .protocol_h6199 import H6199_NATIVE_CONTROLS, build_h6199_control, build_h6
 from .scenes import (
     scene_code_is_ambiguous,
 )
-from .transport import CONTROL_SERVICE_UUID, READ_UUID, WRITE_UUID
+from .transport import CONTROL_SERVICE_UUID, READ_UUID, WRITE_ALT_UUID, WRITE_UUID
 from .video_applicability import (
     h6199_camera_controls_state,
     identity_version,
@@ -1147,7 +1147,11 @@ class GoveeBLECoordinator(
             on_write()
         token = self._notification_token
         try:
-            await client.write_gatt_char(WRITE_UUID, wire_packet, response=self.profile.write_with_response)
+            await client.write_gatt_char(
+                self.profile.write_characteristic_uuid or WRITE_UUID,
+                wire_packet,
+                response=self.profile.write_with_response,
+            )
             self._require_not_shutdown()
         except asyncio.CancelledError:
             if self._encryption is not None:

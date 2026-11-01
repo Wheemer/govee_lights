@@ -105,21 +105,21 @@ class GoveeConfigFlow(ConfigFlow, domain=DOMAIN):
             try:
                 address = _normalize_manual_address(user_input[CONF_ADDRESS])
             except ValueError:
-                return self._show_user_form(errors={CONF_ADDRESS: "invalid_address"})
+                return self._show_user_form(errors={CONF_ADDRESS: "invalid_address"}, step_id="manual_ble")
             await self.async_set_unique_id(address, raise_on_progress=False)
             self._abort_if_unique_id_configured()
             selected_model = user_input[CONF_MODEL]
             service_info = bluetooth.async_last_service_info(self.hass, address, connectable=True)
             advertised_model = model_from_ble_name(service_info.name) if service_info is not None else None
             if advertised_model is not None and advertised_model != selected_model:
-                return self._show_user_form(errors={"base": "model_mismatch"})
+                return self._show_user_form(errors={"base": "model_mismatch"}, step_id="manual_ble")
             try:
                 await async_validate_ble_connection(self.hass, address)
             except BleakError:
-                return self._show_user_form(errors={"base": "cannot_connect"})
+                return self._show_user_form(errors={"base": "cannot_connect"}, step_id="manual_ble")
             except Exception:  # noqa: BLE001 - config flows must surface unexpected validation failures.
                 _LOGGER.exception("Unexpected error validating a Govee BLE device")
-                return self._show_user_form(errors={"base": "unknown"})
+                return self._show_user_form(errors={"base": "unknown"}, step_id="manual_ble")
             self._abort_if_unique_id_configured()
             if selected_model == "H6102":
                 return await self.async_step_h6102_firmware()

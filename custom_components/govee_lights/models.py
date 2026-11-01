@@ -112,6 +112,13 @@ _DEVICE_FEATURES: dict[str, dict[str, bool | int]] = {
     "H617F": {"segmented": True, "brightness_percent": True, "advert_state": True},
     "H618C": {"segmented": True, "brightness_percent": True},
     "H6199": {"segmented": True, "brightness_percent": True},
+    # H1A42 (Strip Light 2) and H61F5 (Strip Light 2 Pro) both have the
+    # H617A command grammar, while their status/music grammars differ.  Their
+    # explicitly documented logical geometries make the basic write path safer
+    # than the generic one-zone fallback, but they remain experimental until
+    # the distinct response codecs are implemented and verified here.
+    "H1A42": {"segmented": True, "segments": 5, "brightness_percent": True},
+    "H61F5": {"segmented": True, "segments": 10, "brightness_percent": True},
 }
 
 # Profiles with a known wire family. A feature entry not present here remains
@@ -121,6 +128,8 @@ _MODEL_PROFILE_METADATA: Final[dict[str, tuple[SupportQuality, str]]] = {
     "H613E": (SupportQuality.VERIFIED, "legacy_0d_bk"),
     "H6076": (SupportQuality.EXPERIMENTAL, "legacy_h617a"),
     "H617F": (SupportQuality.EXPERIMENTAL, "legacy_h617a"),
+    "H1A42": (SupportQuality.EXPERIMENTAL, "legacy_h617a"),
+    "H61F5": (SupportQuality.EXPERIMENTAL, "legacy_h617a"),
 }
 
 

@@ -4,6 +4,8 @@ import importlib.util
 from pathlib import Path
 import sys
 
+import pytest
+
 _MODULE_PATH = Path(__file__).parents[1] / "custom_components" / "govee_lights" / "models.py"
 _SPEC = importlib.util.spec_from_file_location("govee_lights_models", _MODULE_PATH)
 assert _SPEC is not None and _SPEC.loader is not None
@@ -43,6 +45,24 @@ def test_h6076_keeps_its_known_seven_segment_h617a_write_profile_experimental() 
     assert profile.features == {
         "segmented": True,
         "segments": 7,
+        "brightness_percent": True,
+    }
+
+
+@pytest.mark.parametrize(
+    ("model", "segments"),
+    [("H1A42", 5), ("H61F5", 10)],
+)
+def test_h617a_command_siblings_keep_their_known_segment_geometry(
+    model: str, segments: int
+) -> None:
+    profile = get_model_profile(model)
+
+    assert profile.support_quality is SupportQuality.EXPERIMENTAL
+    assert profile.family == "legacy_h617a"
+    assert profile.features == {
+        "segmented": True,
+        "segments": segments,
         "brightness_percent": True,
     }
 

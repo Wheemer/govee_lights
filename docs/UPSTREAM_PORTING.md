@@ -61,6 +61,10 @@ paths are cloud/MQTT semantics, not evidence of a local LAN controller.
   grammar is not. The experimental profile has only the independently
   described seven-segment and percentage-brightness write behavior; it does
   not claim Lyra status parsing, music, scenes, or advanced effects.
+- **H1A42 and H61F5:** These H617A command siblings receive only their known
+  five- and ten-segment write geometry, respectively. Their distinct status,
+  music, scene, and colour-temperature behavior remains unported and is not
+  represented as supported.
 
 ## Acceptance rule for a new family
 

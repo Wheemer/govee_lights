@@ -46,6 +46,7 @@ if TYPE_CHECKING:
 
 from .models import (
     get_segment_count,
+    get_segment_readback_group_size,
     has_advert_state,
     is_segmented_model,
     uses_color_command_ack_state,
@@ -1094,13 +1095,11 @@ class GoveeBLECoordinator(GoveeCoordinator):
             _LOGGER.debug("Failed to parse notify from %s: %s", self.address, data.hex())
 
     def _apply_segment_readback(self, payload: bytes) -> None:
-        """Apply a SEGMENT (0xA5) group answer: [group, then 3 x (brightness,
-        r, g, b)] - see _segment_query_frame. Group 1's first segment doubles
-        as the whole-strip colour, the same payload[2:5] Laserology/
-        govee_ble_lights reads."""
+        """Apply a SEGMENT (0xA5) group answer of brightness/RGB records."""
         group = payload[0]
-        for i in range(SEGMENTS_PER_READBACK_GROUP):
-            index = (group - 1) * SEGMENTS_PER_READBACK_GROUP + i
+        group_size = get_segment_readback_group_size(self.model)
+        for i in range(group_size):
+            index = (group - 1) * group_size + i
             offset = 1 + 4 * i
             if 0 <= index < len(self.segment_colors) and len(payload) >= offset + 4:
                 self.segment_colors[index] = (
@@ -1131,7 +1130,8 @@ class GoveeBLECoordinator(GoveeCoordinator):
                 if self.segment_state_listeners > 0:
                     # Remaining groups only while a segment entity is enabled -
                     # up to 4 more frames per query for a 15-segment strip.
-                    groups = -(-self.segment_count // SEGMENTS_PER_READBACK_GROUP)
+                    group_size = get_segment_readback_group_size(self.model)
+                    groups = -(-self.segment_count // group_size)
                     for group in range(2, groups + 1):
                         await w(
                             BLE_UUID_CONTROL_CHARACTERISTIC,

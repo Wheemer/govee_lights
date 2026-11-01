@@ -15,6 +15,7 @@ _SPEC.loader.exec_module(_MODELS)
 
 SupportQuality = _MODELS.SupportQuality
 get_model_profile = _MODELS.get_model_profile
+get_segment_readback_group_size = _MODELS.get_segment_readback_group_size
 uses_h617a_segment_grammar = _MODELS.uses_h617a_segment_grammar
 
 
@@ -49,6 +50,7 @@ def test_h6076_keeps_its_known_seven_segment_h617a_write_profile_experimental() 
         "segments": 7,
         "brightness_percent": True,
         "h617a_segment_grammar": True,
+        "segment_readback_group_size": 4,
     }
 
 
@@ -68,6 +70,7 @@ def test_h617a_command_siblings_keep_their_known_segment_geometry(
         "segments": segments,
         "brightness_percent": True,
         "h617a_segment_grammar": True,
+        "segment_readback_group_size": 4,
     }
 
 
@@ -78,6 +81,15 @@ def test_known_h617a_command_models_opt_into_the_segmented_white_grammar(model: 
 
 def test_unrelated_segmented_model_does_not_inherit_h617a_white_grammar() -> None:
     assert not uses_h617a_segment_grammar("H6199")
+
+
+@pytest.mark.parametrize("model", ["H6076", "H1A42", "H61F5"])
+def test_newer_h617a_siblings_use_four_segment_readback_groups(model: str) -> None:
+    assert get_segment_readback_group_size(model) == 4
+
+
+def test_legacy_h617a_readback_group_size_remains_three() -> None:
+    assert get_segment_readback_group_size("H617A") == 3
 
 
 def test_unlisted_model_remains_a_generic_fallback() -> None:

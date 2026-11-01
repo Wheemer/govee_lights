@@ -17,6 +17,8 @@ Per-model flags:
   colour/white packet form, including its whole-device bitmask.
 - ``segments``: number of individually addressable segments (only meaningful
   for segmented models). Defaults to :data:`DEFAULT_SEGMENT_COUNT`.
+- ``segment_readback_group_size``: number of segments in each ``0xA5`` state
+  response. The H617A legacy default is three; some newer siblings use four.
 - ``brightness_percent``: device expects brightness as a percentage (0-100)
   instead of a raw byte (0-255).
 - ``colour_d``: device uses BLE mode byte ``0x0D`` instead of ``0x02`` for
@@ -95,6 +97,7 @@ _DEVICE_FEATURES: dict[str, dict[str, bool | int]] = {
         "segments": 7,
         "brightness_percent": True,
         "h617a_segment_grammar": True,
+        "segment_readback_group_size": 4,
     },
     "H6102": {"segmented": True, "colour_d": True, "h617a_segment_grammar": True},
     "H613A": {"brightness_percent": True},
@@ -149,12 +152,14 @@ _DEVICE_FEATURES: dict[str, dict[str, bool | int]] = {
         "segments": 5,
         "brightness_percent": True,
         "h617a_segment_grammar": True,
+        "segment_readback_group_size": 4,
     },
     "H61F5": {
         "segmented": True,
         "segments": 10,
         "brightness_percent": True,
         "h617a_segment_grammar": True,
+        "segment_readback_group_size": 4,
     },
 }
 
@@ -271,3 +276,8 @@ def get_segment_count(model: str) -> int:
         int(_model_features(model).get("segments", DEFAULT_SEGMENT_COUNT)),
         MAX_SEGMENT_COUNT,
     )
+
+
+def get_segment_readback_group_size(model: str) -> int:
+    """Return segment records in one 0xA5 status response for *model*."""
+    return int(_model_features(model).get("segment_readback_group_size", 3))

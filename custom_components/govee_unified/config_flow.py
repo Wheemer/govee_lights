@@ -247,7 +247,7 @@ class GoveeConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_PREFIX_EFFECT_NAMES,
             CONF_ALWAYS_INCLUDE_CUSTOM_EFFECTS,
         }
-        if not MODEL_PROFILES[selected_model].state_readable:
+        if is_appliance_model(selected_model) or not MODEL_PROFILES[selected_model].state_readable:
             excluded.add(CONF_CONNECTION_MODE)
         options = {key: value for key, value in entry.options.items() if key not in excluded}
         if selected_model != previous_model and (effect_backend := get_effect_backend(self.hass)) is not None:
@@ -284,10 +284,11 @@ class GoveeConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] | None = None,
     ) -> ConfigFlowResult:
         current = entry.data.get(CONF_MODEL)
-        default = current if isinstance(current, str) and current in MODEL_PROFILES else next(iter(MODEL_PROFILES))
+        models = [*MODEL_PROFILES.keys(), *sorted(APPLIANCE_MODELS)]
+        default = current if isinstance(current, str) and current in models else models[0]
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=vol.Schema({vol.Required(CONF_MODEL, default=default): vol.In(list(MODEL_PROFILES))}),
+            data_schema=vol.Schema({vol.Required(CONF_MODEL, default=default): vol.In(models)}),
             errors=errors,
         )
 

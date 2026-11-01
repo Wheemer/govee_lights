@@ -65,16 +65,21 @@ SIMPLE_POWER_APPLIANCE_MODELS = frozenset(
         "H7142",
         "H7143",
         "H7145",
+        "H7147",
+        "H7148",
         "H7149",
         "H7150",
         "H7151",
         "H7152",
         "H7160",
         "H7161",
+        "H7162",
         "H7170",
         "H7171",
+        "H717A",
         "H7173",
         "H7175",
+        "H714E",
     }
 )
 APPLIANCE_MODELS = ICE_MAKER_MODELS | SIMPLE_POWER_APPLIANCE_MODELS

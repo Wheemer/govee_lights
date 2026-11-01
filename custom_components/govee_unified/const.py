@@ -8,6 +8,11 @@ from typing import Any
 
 from .h613e_protocol import transform_h613e_static_packet
 from .h6199_calibration import WHITE_BALANCE_POSITIONS
+from .legacy_family_protocol import (
+    transform_extended_rgb_raw_brightness,
+    transform_legacy_0d_percent_brightness,
+    transform_legacy_0d_raw_brightness,
+)
 from .music_semantics import (
     H1A42_MUSIC_VARIANTS,
     H61F5_MUSIC_VARIANTS,
@@ -720,6 +725,69 @@ _H6072_PROFILE = ModelProfile(
 )
 
 MODEL_PROFILES: dict[str, ModelProfile] = {
+    # Basic command families ported from Homebridge Govee's documented BLE
+    # capability map. These declare only RGB, power and brightness because
+    # neither source establishes a common CT/status/effect protocol for them.
+    "H6005": ModelProfile(
+        "H6005 LED Strip",
+        support_quality=SupportQuality.SUPPORTED,
+        command_grammar="H600A",
+        command_operations=frozenset({"power", "brightness", "static"}),
+        outbound_transform=transform_legacy_0d_raw_brightness,
+        supports_rgb=True,
+        whole_device_mask=1,
+        connection_idle_timeout=3.0,
+    ),
+    "H6052": ModelProfile(
+        "H6052 LED Strip",
+        support_quality=SupportQuality.SUPPORTED,
+        command_grammar="H600A",
+        command_operations=frozenset({"power", "brightness", "static"}),
+        outbound_transform=transform_legacy_0d_percent_brightness,
+        supports_rgb=True,
+        whole_device_mask=1,
+        connection_idle_timeout=3.0,
+    ),
+    "H6053": ModelProfile(
+        "H6053 RGBIC LED Strip",
+        support_quality=SupportQuality.SUPPORTED,
+        command_grammar="H617A",
+        command_operations=frozenset({"power", "brightness", "static"}),
+        outbound_transform=transform_extended_rgb_raw_brightness,
+        supports_rgb=True,
+        whole_device_mask=0x7FFF,
+        connection_idle_timeout=3.0,
+    ),
+    "H6058": ModelProfile(
+        "H6058 LED Strip",
+        support_quality=SupportQuality.SUPPORTED,
+        command_grammar="H600A",
+        command_operations=frozenset({"power", "brightness", "static"}),
+        outbound_transform=transform_legacy_0d_percent_brightness,
+        supports_rgb=True,
+        whole_device_mask=1,
+        connection_idle_timeout=3.0,
+    ),
+    "H613B": ModelProfile(
+        "H613B LED Strip",
+        support_quality=SupportQuality.SUPPORTED,
+        command_grammar="H600A",
+        command_operations=frozenset({"power", "brightness", "static"}),
+        outbound_transform=transform_legacy_0d_percent_brightness,
+        supports_rgb=True,
+        whole_device_mask=1,
+        connection_idle_timeout=3.0,
+    ),
+    "H613D": ModelProfile(
+        "H613D LED Strip",
+        support_quality=SupportQuality.SUPPORTED,
+        command_grammar="H600A",
+        command_operations=frozenset({"power", "brightness", "static"}),
+        outbound_transform=transform_legacy_0d_percent_brightness,
+        supports_rgb=True,
+        whole_device_mask=1,
+        connection_idle_timeout=3.0,
+    ),
     # H613E is a bounded legacy-0D profile. Its APK-derived RGB and Kelvin
     # payloads exactly match H600A's whole-bulb static envelope, but its
     # AA 05 00 reply is a write acknowledgement rather than a state update.

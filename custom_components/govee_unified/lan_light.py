@@ -505,7 +505,7 @@ class GoveeSegmentLight(LightEntity):
     """One addressable segment of a strip, as its own light.
 
     Disabled by default - a 15-segment strip would otherwise add 15 entities
-    nobody asked for; the ``govee_lights.set_segment_color`` service on the
+    nobody asked for; the ``govee_unified.set_segment_color`` service on the
     main light covers most uses without them. Per-segment brightness is
     emulated by scaling the colour. State comes from real per-segment
     readback on BLE (SEGMENT group queries, only sent while at least one of

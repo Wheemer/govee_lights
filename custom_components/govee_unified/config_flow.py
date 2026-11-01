@@ -25,15 +25,20 @@ from .const import (
     CONF_CONNECTION_MODE,
     CONF_EFFECT_CATEGORIES,
     CONF_EFFECT_FAMILIES,
+    CONF_FADE,
+    CONF_FADE_OFF,
+    CONF_FADE_ON,
     CONF_H6102_APP_FIRMWARE,
     CONF_H6102_APP_HARDWARE,
     CONF_H6102_PACT,
+    CONF_LAN_IP,
     CONF_MODEL,
     CONF_PREFIX_EFFECT_NAMES,
     CONF_REGISTER_EFFECT_STUDIO,
     CONF_SHOW_EXPERIMENTAL_FEEDBACK,
     CONNECTION_MODE_HOLD,
     CONNECTION_MODE_RELEASE,
+    DEFAULT_FADE,
     DOMAIN,
     MODEL_PROFILES,
     SupportQuality,
@@ -315,6 +320,28 @@ class GoveeConfigFlow(ConfigFlow, domain=DOMAIN):
 
 class GoveeOptionsFlow(OptionsFlowWithReload):
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        # LAN entries use the bulk-ported local API coordinator, which has no
+        # BLE profile/effect options but does support its existing fade tuning.
+        if CONF_LAN_IP in self.config_entry.data:
+            if user_input is not None:
+                return self.async_create_entry(data=user_input)
+            options = self.config_entry.options
+            return self.async_show_form(
+                step_id="init",
+                data_schema=vol.Schema(
+                    {
+                        vol.Optional(CONF_FADE, default=options.get(CONF_FADE, DEFAULT_FADE)): vol.All(
+                            vol.Coerce(float), vol.Range(min=0)
+                        ),
+                        vol.Optional(CONF_FADE_ON, default=options.get(CONF_FADE_ON, DEFAULT_FADE)): vol.All(
+                            vol.Coerce(float), vol.Range(min=0)
+                        ),
+                        vol.Optional(CONF_FADE_OFF, default=options.get(CONF_FADE_OFF, DEFAULT_FADE)): vol.All(
+                            vol.Coerce(float), vol.Range(min=0)
+                        ),
+                    }
+                ),
+            )
         raw_model = self.config_entry.data.get(CONF_MODEL)
         model = resolve_model(raw_model) if isinstance(raw_model, str) else None
         if model is None:

@@ -49,12 +49,34 @@
       },
       "user": {
         "data": {
+          "transport": "Connection type"
+        },
+        "data_description": {
+          "transport": "Choose Bluetooth for direct local BLE control, or LAN (Wi-Fi) for direct local network control."
+        }
+      },
+      "manual_ble": {
+        "data": {
           "address": "BLE Address",
           "model": "Device Model"
         },
         "data_description": {
           "address": "The 12-digit Bluetooth address printed by the device or shown by a BLE scanner.",
           "model": "The model printed on the device. A conflicting supported model advertised at this address is rejected."
+        }
+      },
+      "lan": {
+        "title": "Govee LAN (Wi-Fi)",
+        "description": "Found {discovered} device(s) on your local network. Select one, or enter an IP address and model manually.",
+        "data": {
+          "lan_device_key": "Discovered device",
+          "lan_ip": "IP address (manual)",
+          "lan_sku": "Govee model"
+        },
+        "data_description": {
+          "lan_device_key": "Select a Govee device discovered on your local network via the LAN API.",
+          "lan_ip": "IP address of the Govee device, when it was not auto-discovered.",
+          "lan_sku": "Model number printed on the device label. Required for manual IP entry."
         }
       },
       "reconfigure": {
@@ -86,6 +108,7 @@
       "cannot_connect": "Unable to connect to the device.",
       "model_mismatch": "The device at this address advertises a different supported model.",
       "unknown": "Unexpected error while validating the device."
+      ,"no_device_selected": "Select a discovered device or enter both an IP address and model."
     },
     "abort": {
       "already_configured": "Device is already configured",
@@ -245,12 +268,18 @@
           "advanced": "Advanced",
           "prefix_effect_names": "Prefix effects with their category (e.g., \"Scene: Aurora\")",
           "always_include_custom_effects": "Always include my custom effects",
-          "show_experimental_feedback": "Show experimental feedback notice"
+          "show_experimental_feedback": "Show experimental feedback notice",
+          "fade": "Colour change fade",
+          "fade_on": "Power-on fade-in",
+          "fade_off": "Power-off fade-to-black"
         },
         "data_description": {
           "connection_mode": "Release disconnects after use so the Govee app can connect. Hold keeps the BLE connection open and may prevent the app from connecting.",
           "register_effect_studio": "Registers one shared panel for all users while any enabled light has this option checked.  To hide it only for yourself, use your Home Assistant profile's sidebar settings.  Light controls and effects are unchanged.",
-          "show_experimental_feedback": "Show the feedback notice in Effect Studio for this light.  Turning this off hides it for all users.  Hide in Studio dismisses it only for the current tab session."
+          "show_experimental_feedback": "Show the feedback notice in Effect Studio for this light.  Turning this off hides it for all users.  Hide in Studio dismisses it only for the current tab session.",
+          "fade": "Crossfade duration for an ordinary colour or colour-temperature change while the light is already on.",
+          "fade_on": "Ramp-up duration when the light turns on, fading in from black.",
+          "fade_off": "Fade-to-black duration before the light powers off."
         }
       }
     }

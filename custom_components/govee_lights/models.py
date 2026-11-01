@@ -84,6 +84,11 @@ _DEVICE_FEATURES: dict[str, dict[str, bool | int]] = {
     "H6053": {"segmented": True, "segments": 12},
     "H6058": {"colour_d": True},
     "H6072": {"segmented": True},
+    # H6076 (Lyra) uses the H617A command grammar but has its own status
+    # grammar. The upstream packet-tested profile confirms seven logical
+    # segments; expose only the compatible write path until this project ports
+    # and verifies H6076's status decoder and advanced effects.
+    "H6076": {"segmented": True, "segments": 7, "brightness_percent": True},
     "H6102": {"segmented": True, "colour_d": True},
     "H613A": {"brightness_percent": True},
     "H613B": {"colour_d": True},
@@ -114,6 +119,7 @@ _DEVICE_FEATURES: dict[str, dict[str, bool | int]] = {
 # verified per-model protocol implementation merely because its name matches.
 _MODEL_PROFILE_METADATA: Final[dict[str, tuple[SupportQuality, str]]] = {
     "H613E": (SupportQuality.VERIFIED, "legacy_0d_bk"),
+    "H6076": (SupportQuality.EXPERIMENTAL, "legacy_h617a"),
     "H617F": (SupportQuality.EXPERIMENTAL, "legacy_h617a"),
 }
 

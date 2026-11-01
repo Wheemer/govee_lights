@@ -57,6 +57,10 @@ paths are cloud/MQTT semantics, not evidence of a local LAN controller.
   but labels it `experimental` pending an independent packet capture or
   physical-device validation. This is not an assertion that the advanced
   effects, segment readback, or every H617A feature has been ported.
+- **H6076:** The Lyra's command grammar is H617A-compatible, but its status
+  grammar is not. The experimental profile has only the independently
+  described seven-segment and percentage-brightness write behavior; it does
+  not claim Lyra status parsing, music, scenes, or advanced effects.
 
 ## Acceptance rule for a new family
 

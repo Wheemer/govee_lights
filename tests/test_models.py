@@ -35,6 +35,18 @@ def test_h617f_uses_the_explicit_h617a_compatible_experimental_profile() -> None
     }
 
 
+def test_h6076_keeps_its_known_seven_segment_h617a_write_profile_experimental() -> None:
+    profile = get_model_profile("H6076")
+
+    assert profile.support_quality is SupportQuality.EXPERIMENTAL
+    assert profile.family == "legacy_h617a"
+    assert profile.features == {
+        "segmented": True,
+        "segments": 7,
+        "brightness_percent": True,
+    }
+
+
 def test_unlisted_model_remains_a_generic_fallback() -> None:
     profile = get_model_profile("H9999")
 

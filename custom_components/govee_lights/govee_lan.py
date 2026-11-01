@@ -182,6 +182,9 @@ class GoveeLANCoordinator(GoveeCoordinator):
         )
         self._segment_count = self._lan_capabilities.segment_count
         self.segment_colors = [None] * self._segment_count
+        # LAN currently has no native per-segment brightness command, but
+        # segment entities share this state surface with BLE coordinators.
+        self.segment_brightness = [None] * self._segment_count
 
         self._send_lock = asyncio.Lock()
         self._last_send = 0.0

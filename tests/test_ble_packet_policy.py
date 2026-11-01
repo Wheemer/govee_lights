@@ -24,6 +24,12 @@ for _module_name in ("legacy_protocol", "ble_packet_policy"):
 build_color_temp_packet = sys.modules["govee_lights.ble_packet_policy"].build_color_temp_packet
 encode_ha_brightness = sys.modules["govee_lights.ble_packet_policy"].encode_ha_brightness
 decode_device_brightness = sys.modules["govee_lights.ble_packet_policy"].decode_device_brightness
+decode_segment_brightness_percent = sys.modules[
+    "govee_lights.ble_packet_policy"
+].decode_segment_brightness_percent
+decode_h617a_segment_status_record = sys.modules[
+    "govee_lights.ble_packet_policy"
+].decode_h617a_segment_status_record
 
 
 def test_h617a_packet_takes_priority_over_colour_d_for_segmented_models() -> None:
@@ -80,3 +86,32 @@ def test_h6102_brightness_uses_its_documented_register_range(
 def test_h6102_brightness_decoder_treats_zero_as_off_and_clamps_registers() -> None:
     assert decode_device_brightness(0, percentage=True, wire_range=(20, 254)) == 0
     assert decode_device_brightness(1, percentage=True, wire_range=(20, 254)) == round(255 / 100)
+
+
+@pytest.mark.parametrize(
+    ("percent", "ha_brightness"),
+    [(0, 0), (1, 3), (50, 128), (100, 255)],
+)
+def test_h617a_segment_status_brightness_is_a_zero_to_hundred_percent_field(
+    percent: int, ha_brightness: int
+) -> None:
+    assert decode_segment_brightness_percent(percent) == ha_brightness
+
+
+@pytest.mark.parametrize("percent", [-1, 101])
+def test_h617a_segment_status_rejects_out_of_range_brightness(percent: int) -> None:
+    with pytest.raises(ValueError, match="percentage"):
+        decode_segment_brightness_percent(percent)
+
+
+def test_h6102_segment_status_record_preserves_native_brightness_separately_from_rgb() -> None:
+    # The H6102 upstream fixture's first record is [0, 0, 0, 0]: it is an
+    # explicit off segment, not an omitted colour record.
+    assert decode_h617a_segment_status_record(bytes([0, 0, 0, 0])) == (0, (0, 0, 0))
+    assert decode_h617a_segment_status_record(bytes([50, 32, 64, 96])) == (128, (32, 64, 96))
+
+
+@pytest.mark.parametrize("record", [b"", b"\x32\x20\x40", b"\x32\x20\x40\x60\x00"])
+def test_h617a_segment_status_record_requires_exact_wire_length(record: bytes) -> None:
+    with pytest.raises(ValueError, match="four bytes"):
+        decode_h617a_segment_status_record(record)

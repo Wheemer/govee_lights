@@ -38,6 +38,25 @@ def decode_device_brightness(
     return register
 
 
+def decode_segment_brightness_percent(percent: int) -> int:
+    """Convert an H617A segment-status percentage to HA's 0..255 scale.
+
+    Segment status records carry their own 0..100 brightness byte before the
+    RGB triplet. Unlike the whole-device register, zero is valid here and
+    represents an explicitly dark segment.
+    """
+    if not 0 <= percent <= 100:
+        raise ValueError("Segment brightness percentage must be from 0 to 100")
+    return round(percent * 255 / 100)
+
+
+def decode_h617a_segment_status_record(record: bytes) -> tuple[int, tuple[int, int, int]]:
+    """Decode one H617A status record: percent followed by RGB."""
+    if len(record) != 4:
+        raise ValueError("H617A segment status record must contain four bytes")
+    return decode_segment_brightness_percent(record[0]), (record[1], record[2], record[3])
+
+
 def build_color_temp_packet(
     *,
     kelvin: int,

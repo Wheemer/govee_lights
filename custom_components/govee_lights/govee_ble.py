@@ -31,6 +31,7 @@ from homeassistant.helpers.event import async_call_later
 from .ble_packet_policy import (
     build_color_temp_packet,
     decode_device_brightness,
+    decode_h617a_segment_status_record,
     encode_ha_brightness,
 )
 from .const import DOMAIN
@@ -1148,9 +1149,15 @@ class GoveeBLECoordinator(GoveeCoordinator):
             index = (group - 1) * group_size + i
             offset = 1 + 4 * i
             if 0 <= index < len(self.segment_colors) and len(payload) >= offset + 4:
-                self.segment_colors[index] = (
-                    payload[offset + 1], payload[offset + 2], payload[offset + 3]
+                # H617A-family segment-status records are
+                # [brightness_percent, red, green, blue]. Keep the native
+                # brightness state separate from rendered RGB so a black
+                # segment and a dim coloured segment are distinguishable.
+                brightness, color = decode_h617a_segment_status_record(
+                    payload[offset : offset + 4]
                 )
+                self.segment_brightness[index] = brightness
+                self.segment_colors[index] = color
         if group == 1:
             self.rgb_color = (payload[2], payload[3], payload[4])
 

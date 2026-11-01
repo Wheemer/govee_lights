@@ -10,12 +10,12 @@
             "service_uuid": "00010203-0405-0607-0809-0a0b0c0d2b11", "connectable": true
         }
     ],
-    "codeowners": ["@Jaano"],
+    "codeowners": ["@Wheemer"],
     "requirements": ["bleak-retry-connector", "requests>=2.31.0", "govee-local-api>=3.1.0"],
     "dependencies": ["network"],
-    "issue_tracker": "https://github.com/Jaano/govee_lights/issues",
-    "documentation": "https://github.com/Jaano/govee_lights",
+    "issue_tracker": "https://github.com/Wheemer/govee_lights/issues",
+    "documentation": "https://github.com/Wheemer/govee_lights",
     "config_flow": true,
     "iot_class": "local_push",
-    "version": "0.5.0"
+    "version": "0.5.1"
 }

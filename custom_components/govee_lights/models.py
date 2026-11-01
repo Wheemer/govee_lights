@@ -19,6 +19,14 @@ Per-model flags:
   instead of a raw byte (0-255).
 - ``colour_d``: device uses BLE mode byte ``0x0D`` instead of ``0x02`` for
   colour/color-temperature packets.
+- ``color_command_ack_state``: device reports color-command acceptance as ``AA <command>
+  00``; preserve the command's optimistic state instead of immediately
+  querying and applying a potentially stale report.
+- ``connection_settle``: wait for the control service to settle after a fresh
+  connection before sending the first control frame.
+- ``color_write_with_response``: the app writes the legacy colour frame using
+  a GATT write request. This is deliberately scoped to COLOR here; POWER
+  retains this integration's established write-without-response behavior.
 - ``advert_state``: device broadcasts on/off state in its BLE advertisement
   (as ``ec 00 0a 01 <state>``), so power state can be tracked passively
   without an open GATT connection.
@@ -49,6 +57,14 @@ _DEVICE_FEATURES: dict[str, dict[str, bool | int]] = {
     "H613A": {"brightness_percent": True},
     "H613B": {"colour_d": True},
     "H613D": {"colour_d": True},
+    # This H613E reports its active colour layout as 0x0D. The old app's
+    # H6138-family code has the matching SubModeColor4Bk serializer.
+    "H613E": {
+        "colour_d": True,
+        "color_command_ack_state": True,
+        "connection_settle": True,
+        "color_write_with_response": True,
+    },
     "H617A": {"segmented": True, "brightness_percent": True, "advert_state": True},
     "H617C": {"segmented": True, "brightness_percent": True, "advert_state": True},
     "H617E": {"segmented": True, "brightness_percent": True, "colour_d": True},
@@ -92,6 +108,24 @@ def uses_percent_brightness(model: str) -> bool:
 def uses_colour_d_mode(model: str) -> bool:
     """Return True when *model* uses mode byte 0x0D instead of 0x02."""
     return bool(_model_features(model).get("colour_d", False))
+
+
+def uses_color_command_ack_state(model: str) -> bool:
+    """Return whether COLOR command replies acknowledge writes rather than state."""
+
+    return bool(_model_features(model).get("color_command_ack_state", False))
+
+
+def uses_connection_settle(model: str) -> bool:
+    """Return whether a fresh BLE connection needs a control-service settle delay."""
+
+    return bool(_model_features(model).get("connection_settle", False))
+
+
+def uses_color_write_with_response(model: str) -> bool:
+    """Return whether plain COLOR frames use a GATT write request."""
+
+    return bool(_model_features(model).get("color_write_with_response", False))
 
 
 def has_advert_state(model: str) -> bool:

@@ -40,15 +40,24 @@ from .models import (
     get_segment_count,
     has_advert_state,
     is_segmented_model,
+    uses_color_command_ack_state,
+    uses_color_write_with_response,
     uses_colour_d_mode,
+    uses_connection_settle,
     uses_percent_brightness,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 # ── BLE GATT UUIDs ─────────────────────────────────────────────────────────
+BLE_UUID_CONTROL_SERVICE: str = "00010203-0405-0607-0809-0a0b0c0d1910"
 BLE_UUID_CONTROL_CHARACTERISTIC: str = "00010203-0405-0607-0809-0a0b0c0d2b11"
 BLE_UUID_NOTIFY_CHARACTERISTIC: str = "00010203-0405-0607-0809-0a0b0c0d2b10"
+# Govee Home reads this optional characteristic immediately after connecting.
+# A value of 01 or 02 tells the app to wrap subsequent control frames using
+# its encryption protocol. Keep this as a diagnostic read until that wrapper
+# is implemented and verified for H613E.
+BLE_UUID_ENCRYPTION_INFO_CHARACTERISTIC: str = "00010203-0405-0607-0809-0a0b0c0d2b12"
 
 BLE_MUSIC_MODES: dict[str, int] = {
     "Music mode - Energic": 0x05,
@@ -657,7 +666,19 @@ class GoveeBLECoordinator(GoveeCoordinator):
         await self.send_command(GoveeBLE.build_single_packet(GoveeBLE.LEDCommand.BRIGHTNESS, [val]))
 
     async def async_set_rgb_color(self, r: int, g: int, b: int, *, verify: bool = True) -> None:
+        command_ack_state = uses_color_command_ack_state(self.model)
+        mode_byte = (
+            GoveeBLE.LEDMode.COLOUR_D
+            if uses_colour_d_mode(self.model)
+            else GoveeBLE.LEDMode.MANUAL
+        )
+        previous_mode = self.mode
+        previous_rgb_color = self.rgb_color
+        previous_color_temp = self.color_temp_kelvin
         self.color_temp_kelvin = None
+        if command_ack_state:
+            self.mode = mode_byte
+            self.rgb_color = (r, g, b)
         self.segment_colors = [(r, g, b)] * self.segment_count
         if is_segmented_model(self.model):
             packet = GoveeBLE.build_single_packet(
@@ -667,9 +688,20 @@ class GoveeBLECoordinator(GoveeCoordinator):
             )
         else:
             packet = GoveeBLE.build_single_packet(
-                GoveeBLE.LEDCommand.COLOR, [GoveeBLE.LEDMode.MANUAL, r, g, b]
+                GoveeBLE.LEDCommand.COLOR, [mode_byte, r, g, b]
             )
-        await self.send_command(packet, verify=verify)
+        try:
+            await self.send_command(
+                packet,
+                verify=verify,
+                response=uses_color_write_with_response(self.model),
+            )
+        except Exception:
+            if command_ack_state:
+                self.mode = previous_mode
+                self.rgb_color = previous_rgb_color
+                self.color_temp_kelvin = previous_color_temp
+            raise
 
     async def async_set_color_temp(self, kelvin: int, *, verify: bool = True) -> None:
         """Send a native colour-temperature packet (white-balance mode).
@@ -682,19 +714,35 @@ class GoveeBLECoordinator(GoveeCoordinator):
         future state-query notifications return a garbled colour.
         """
         r, g, b = GoveeBLE.kelvin_to_rgb(kelvin)
-        mode_byte = (
-            GoveeBLE.LEDMode.COLOUR_D
-            if uses_colour_d_mode(self.model)
-            else GoveeBLE.LEDMode.MANUAL
-        )
+        # H613E's 0x0D/Bk serializer has a distinct CT form from plain RGB:
+        # 0D FF FF FF <kelvin:big-endian> <temperature RGB>.  The app's
+        # SubModeColor4Bk writes the kelvin short before the temperature RGB.
+        if uses_colour_d_mode(self.model):
+            packet_data = [
+                GoveeBLE.LEDMode.COLOUR_D,
+                0xFF,
+                0xFF,
+                0xFF,
+                (kelvin >> 8) & 0xFF,
+                kelvin & 0xFF,
+                r,
+                g,
+                b,
+            ]
+        else:
+            packet_data = [GoveeBLE.LEDMode.MANUAL, 0xFF, 0xFF, 0xFF, 0x01, r, g, b]
         packet = GoveeBLE.build_single_packet(
             GoveeBLE.LEDCommand.COLOR,
-            [mode_byte, 0xFF, 0xFF, 0xFF, 0x01, r, g, b],
+            packet_data,
         )
         self.color_temp_kelvin = kelvin
         self.rgb_color = (r, g, b)
         self.segment_colors = [(r, g, b)] * self.segment_count
-        await self.send_command(packet, verify=verify)
+        await self.send_command(
+            packet,
+            verify=verify,
+            response=uses_color_write_with_response(self.model),
+        )
 
     async def async_set_segment_colors(
         self, colors: dict[int, tuple[int, int, int]], *, verify: bool = True
@@ -843,6 +891,12 @@ class GoveeBLECoordinator(GoveeCoordinator):
 
         self._reset_disconnect_timer()
         await self._start_notify()
+        await self._log_h613e_encryption_info()
+        if uses_connection_settle(self.model):
+            # The Govee app enables the whole control service, including its
+            # descriptors, before the first command. Allow a conservative
+            # service-settle period before writing or querying state.
+            await asyncio.sleep(0.7)
         if query_state:
             await self._send_state_queries()
         return self._client
@@ -914,13 +968,61 @@ class GoveeBLECoordinator(GoveeCoordinator):
     # ── BLE notifications ─────────────────────────────────────────────────────
 
     async def _start_notify(self) -> None:
-        if self._client and self._client.is_connected:
-            try:
-                await self._client.start_notify(BLE_UUID_NOTIFY_CHARACTERISTIC, self._notify_callback)
-            except BleakError as err:
-                _LOGGER.debug("Failed to start notify for %s: %s", self.address, err)
+        if not self._client or not self._client.is_connected:
+            return
 
-    def _notify_callback(self, _sender: Any, data: bytearray) -> None:
+        # Govee Home enables notifications and the CCCD for every
+        # notification-capable characteristic in the 1910 service before its
+        # first command. Its H613E handler uses that generic setup; subscribing
+        # only to 2B10 leaves a real difference from the app's working path.
+        characteristic_uuids = [BLE_UUID_NOTIFY_CHARACTERISTIC]
+        if self.model == "H613E":
+            service = self._client.services.get_service(BLE_UUID_CONTROL_SERVICE)
+            if service is not None:
+                for characteristic in service.characteristics:
+                    if characteristic.uuid in characteristic_uuids:
+                        continue
+                    if {"notify", "indicate"}.intersection(characteristic.properties):
+                        characteristic_uuids.append(characteristic.uuid)
+
+        for characteristic_uuid in characteristic_uuids:
+            try:
+                await self._client.start_notify(characteristic_uuid, self._notify_callback)
+            except BleakError as err:
+                _LOGGER.debug(
+                    "Failed to start notify for %s characteristic %s: %s",
+                    self.address,
+                    characteristic_uuid,
+                    err,
+                )
+
+    async def _log_h613e_encryption_info(self) -> None:
+        """Read the optional Govee encryption-info characteristic for H613E."""
+        if self.model != "H613E" or not self._client:
+            return
+        encryption_info = self._client.services.get_characteristic(
+            BLE_UUID_ENCRYPTION_INFO_CHARACTERISTIC
+        )
+        if encryption_info is None:
+            _LOGGER.warning(
+                "H613E %s has no Govee encryption-info characteristic", self.address
+            )
+            return
+        try:
+            encryption_version = bytes(
+                await self._client.read_gatt_char(BLE_UUID_ENCRYPTION_INFO_CHARACTERISTIC)
+            )
+            _LOGGER.warning(
+                "H613E %s Govee encryption-info=%s",
+                self.address,
+                encryption_version.hex(),
+            )
+        except BleakError as err:
+            _LOGGER.warning(
+                "H613E %s could not read Govee encryption-info: %s", self.address, err
+            )
+
+    def _notify_callback(self, _sender: Any, data: bytearray) -> None:  # noqa: PLR0912
         if len(data) < 3 or data[0] != 0xAA:
             return
         domain, payload = data[1], bytes(data[2:])
@@ -931,7 +1033,12 @@ class GoveeBLECoordinator(GoveeCoordinator):
                 self._power_reported.set()
             elif domain == GoveeBLE.LEDCommand.BRIGHTNESS:
                 self.brightness_raw = payload[0]
-            elif domain == GoveeBLE.LEDCommand.COLOR:
+            elif (
+                domain == GoveeBLE.LEDCommand.COLOR
+                # H613E's app treats AA 05 00 as a successful write reply;
+                # it is not a mode-zero state report.
+                and not (uses_color_command_ack_state(self.model) and payload[0] == 0x00)
+            ):
                 self.mode = payload[0]
                 if self.mode == GoveeBLE.LEDMode.MUSIC and len(payload) >= 2:
                     self.music_mode_id = payload[1]
@@ -958,8 +1065,9 @@ class GoveeBLECoordinator(GoveeCoordinator):
                     self.mode in (GoveeBLE.LEDMode.MANUAL, GoveeBLE.LEDMode.COLOUR_D)
                     and len(payload) >= 4
                 ):
-                    # Detect native CT response: [mode, 0xFF, 0xFF, 0xFF, 0x01, r, g, b]
-                    # The white-ref prefix + 0x01 flag means the device is in white-balance mode.
+                    # Detect native CT responses.  Most models use
+                    # [mode, FF, FF, FF, 01, r, g, b]; H613E uses the Bk form
+                    # [0D, FF, FF, FF, kelvin_hi, kelvin_lo, r, g, b].
                     is_ct = (
                         len(payload) >= 8
                         and payload[1] == 0xFF
@@ -970,6 +1078,14 @@ class GoveeBLECoordinator(GoveeCoordinator):
                     if is_ct:
                         self.rgb_color = (payload[5], payload[6], payload[7])
                         # color_temp_kelvin already set by async_set_color_temp; preserve it.
+                    elif (
+                        self.mode == GoveeBLE.LEDMode.COLOUR_D
+                        and len(payload) >= 9
+                        and payload[1:4] == b"\xff\xff\xff"
+                        and 2000 <= ((payload[4] << 8) | payload[5]) <= 9000
+                    ):
+                        self.color_temp_kelvin = (payload[4] << 8) | payload[5]
+                        self.rgb_color = (payload[6], payload[7], payload[8])
                     else:
                         self.rgb_color = (payload[1], payload[2], payload[3])
                         self.color_temp_kelvin = None  # device is in plain RGB mode
@@ -1073,7 +1189,12 @@ class GoveeBLECoordinator(GoveeCoordinator):
     # ── Command dispatch ──────────────────────────────────────────────────────
 
     async def send_command(
-        self, packet: bytes, *, expected_power: bool | None = None, verify: bool = True
+        self,
+        packet: bytes,
+        *,
+        expected_power: bool | None = None,
+        verify: bool = True,
+        response: bool = False,
     ) -> None:
         """Send a single BLE packet, ensuring a live connection.
 
@@ -1082,7 +1203,9 @@ class GoveeBLECoordinator(GoveeCoordinator):
         intermediate frame would flood the device with state requests.
         """
         async with self._lock:
-            await self._dispatch([packet], expected_power=expected_power, verify=verify)
+            await self._dispatch(
+                [packet], expected_power=expected_power, verify=verify, response=response
+            )
 
     async def send_commands(
         self,
@@ -1102,23 +1225,34 @@ class GoveeBLECoordinator(GoveeCoordinator):
         delay: float = 0.0,
         expected_power: bool | None = None,
         verify: bool = True,
+        response: bool = False,
     ) -> None:
         """Internal: write packets to the device with retry on connection errors."""
         for attempt in range(BLE_CONNECT_ATTEMPTS):
             try:
-                client = await self._ensure_connected(query_state=not verify)
+                color_command_ack_state = (
+                    uses_color_command_ack_state(self.model)
+                    and any(bytes(packet)[1] == GoveeBLE.LEDCommand.COLOR for packet in packets)
+                )
+                client = await self._ensure_connected(
+                    query_state=not verify and not color_command_ack_state
+                )
                 for i, pkt in enumerate(packets):
                     _LOGGER.debug(
                         "tx %s [%d/%d]: %s",
                         self.address, i + 1, len(packets), bytes(pkt).hex(),
                     )
-                    await client.write_gatt_char(GoveeBLE.UUID_CONTROL_CHARACTERISTIC, pkt, False)
+                    await client.write_gatt_char(
+                        GoveeBLE.UUID_CONTROL_CHARACTERISTIC,
+                        pkt,
+                        response=response,
+                    )
                     if delay > 0 and i < len(packets) - 1:
                         await asyncio.sleep(delay)
                 if not self._available:
                     self._available = True
                     self.async_set_updated_data(self._state_snapshot())
-                if verify:
+                if verify and not color_command_ack_state:
                     # Confirm the command took effect and refresh HA's state.
                     self.hass.async_create_background_task(
                         self._query_state_after_command(expected_power=expected_power),

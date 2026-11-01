@@ -395,7 +395,10 @@ class GoveeLight(LightEntity, RestoreEntity):
         transition = kwargs.get(ATTR_TRANSITION)
         self._attr_is_on = True
         try:
-            if not cloud_effect:
+            # Re-sending POWER for an already-on light starts a verification
+            # query that can overwrite a just-requested colour with stale
+            # device state. A power command is only needed to wake an off light.
+            if not cloud_effect and was_off:
                 await self._coordinator.async_turn_on()
 
             if ATTR_BRIGHTNESS in kwargs:

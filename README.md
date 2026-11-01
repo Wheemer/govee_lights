@@ -27,7 +27,7 @@ Add this fork manually as a HACS custom repository:
 
 1. Open **HACS** in Home Assistant.
 2. Open the **⋮** menu in the top right and select **Custom repositories**.
-3. Enter **Repository:** `https://github.com/Jaano/govee_lights` and select **Type:** `Integration`.
+3. Enter **Repository:** `https://github.com/Wheemer/govee_lights` and select **Type:** `Integration`.
 4. Click **Add**, then find **Govee Lights (++)** in HACS and click **Download**.
 5. Restart Home Assistant.
 6. Go to **Settings → Devices & Services → Add Integration**, search for **Govee Lights (++)**, and follow the setup steps.
@@ -92,7 +92,7 @@ Via HACS: open HACS > Integrations, find Govee Lights (++), three-dot menu > Rem
 
 ## Support
 
-Report bugs or missing device support in the [issue tracker](https://github.com/Jaano/govee_lights/issues). PRs welcome.
+Report bugs or missing device support in the [issue tracker](https://github.com/Wheemer/govee_lights/issues). PRs welcome.
 
 ---
 
@@ -110,4 +110,4 @@ Report bugs or missing device support in the [issue tracker](https://github.com/
 
 ## License
 
-MIT License. See the [LICENSE file](https://github.com/Jaano/govee_lights/blob/main/LICENSE) for details.
+MIT License. See the [LICENSE file](https://github.com/Wheemer/govee_lights/blob/master/LICENSE) for details.

@@ -38,3 +38,18 @@ def transform_legacy_0d_percent_brightness(packet: bytes) -> bytes:
 def transform_extended_rgb_raw_brightness(packet: bytes) -> bytes:
     """H6053: 15/01 extended RGB envelope and 0..255 brightness register."""
     return _scale_brightness_to_255(packet)
+
+
+def transform_legacy_generic_rgb_raw_brightness(packet: bytes) -> bytes:
+    """Port the portable integration's 02/RGB and raw-level legacy family.
+
+    The shared serializer supplies an H617A-shaped static frame.  This family
+    instead uses the older ``33 05 02 RR GG BB`` body and stores brightness as
+    an unsigned 0..255 byte. Power frames already share the same envelope.
+    """
+    if len(packet) == 20 and packet[:3] == b"\x33\x05\x15":
+        frame = bytearray(packet)
+        red, green, blue = frame[4:7]
+        frame[2:19] = bytes((0x02, red, green, blue)) + bytes(13)
+        return _resign(frame)
+    return _scale_brightness_to_255(packet)

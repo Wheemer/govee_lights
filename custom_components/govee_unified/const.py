@@ -10,6 +10,7 @@ from .h613e_protocol import transform_h613e_static_packet
 from .h6199_calibration import WHITE_BALANCE_POSITIONS
 from .legacy_family_protocol import (
     transform_extended_rgb_raw_brightness,
+    transform_legacy_generic_rgb_raw_brightness,
     transform_legacy_0d_percent_brightness,
     transform_legacy_0d_raw_brightness,
 )
@@ -1991,6 +1992,36 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
         supports_music_color=True,
     ),
 }
+
+# The portable BLE implementation explicitly controls these APK-listed local
+# models with the legacy 02/RGB, raw-brightness envelope.  They deliberately
+# expose only power, RGB and brightness: its source does not establish shared
+# segment, effect, colour-temperature or state-readback semantics for them.
+_LEGACY_GENERIC_RGB_MODELS = (
+    "H6006", "H6009", "H6010", "H601A", "H601B", "H6047", "H604A", "H604B",
+    "H6054", "H6056", "H6057", "H6059", "H605C", "H6061", "H6062", "H6065",
+    "H6066", "H6067", "H6078", "H6088", "H610A", "H610B", "H6138", "H6139",
+    "H6143", "H6144", "H615E", "H6171", "H6173", "H618A", "H618E", "H6196",
+    "H619A", "H619C", "H619E", "H61A0", "H61A1", "H61A2", "H61A5", "H61A8",
+    "H61B2", "H61C3", "H61C5", "H61E0", "H61E1", "H6602", "H6609", "H7021",
+    "H7033", "H7041", "H7050", "H7051", "H7055", "H705A", "H705B", "H705C",
+    "H7060", "H7061", "H7062", "H7065", "H7066", "H7090", "H70B1",
+)
+MODEL_PROFILES.update(
+    {
+        model: ModelProfile(
+            f"{model} Govee Light",
+            support_quality=SupportQuality.SUPPORTED,
+            command_grammar="H617A",
+            command_operations=frozenset({"power", "brightness", "static"}),
+            outbound_transform=transform_legacy_generic_rgb_raw_brightness,
+            supports_rgb=True,
+            whole_device_mask=0x7FFF,
+            connection_idle_timeout=3.0,
+        )
+        for model in _LEGACY_GENERIC_RGB_MODELS
+    }
+)
 
 BLE_DISCOVERABLE_MODELS = frozenset(MODEL_PROFILES)
 

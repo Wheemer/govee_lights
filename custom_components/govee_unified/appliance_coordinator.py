@@ -14,11 +14,12 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .appliance_protocol import (
     build_h7172_power_query,
     build_h7172_power_write,
+    build_standard_power_write,
     parse_h7172_power_reply,
     parse_h7172_work_status,
 )
 from .ble_connection import async_establish_ble_connection
-from .const import DOMAIN
+from .const import DOMAIN, ICE_MAKER_MODELS
 from .transport import READ_UUID, WRITE_UUID
 
 _LOGGER = logging.getLogger(__name__)
@@ -67,7 +68,12 @@ class GoveeApplianceCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         async with self._lock:
             await self._ensure_connected()
             self._power_reply.clear()
-            await self._write(build_h7172_power_write(enabled))
+            packet = (
+                build_h7172_power_write(enabled)
+                if self.model in ICE_MAKER_MODELS
+                else build_standard_power_write(enabled)
+            )
+            await self._write(packet)
             self.is_on = enabled
             self.async_set_updated_data(self._snapshot())
             # Read back with the exact APK query after an optimistic update.

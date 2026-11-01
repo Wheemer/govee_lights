@@ -12,6 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from . import GoveeBLEConfigEntry
 from .appliance_coordinator import GoveeApplianceCoordinator
 from .appliance_entity import GoveeApplianceEntity
+from .const import ICE_MAKER_MODELS
 from .const import DOMAIN
 from .entity import GoveeBLEEntity
 
@@ -93,7 +94,11 @@ class GoveeIceMakerSwitch(GoveeApplianceEntity, SwitchEntity):
 
     def __init__(self, coordinator: GoveeApplianceCoordinator) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.address.replace(':', '').lower()}_ice_maker"
+        self._attr_name = {
+            "H7111": "Fan",
+            "H7121": "Air Purifier",
+        }.get(coordinator.model, "Ice Maker" if coordinator.model in ICE_MAKER_MODELS else "Power")
+        self._attr_unique_id = f"{coordinator.address.replace(':', '').lower()}_appliance_power"
         self._attr_device_info = coordinator.device_info
 
     @property

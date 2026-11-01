@@ -54,6 +54,15 @@ def build_h7172_power_write(enabled: bool) -> bytes:
     )
 
 
+def build_standard_power_write(enabled: bool) -> bytes:
+    """Build Govee's shared APK ``SwitchController`` write.
+
+    The H7111 fan and H7121 air-purifier modules both instantiate the shared
+    controller, whose ``getValue`` serializes ``33 01 <0|1>``.
+    """
+    return build_legacy_frame(0x33, _H7172_POWER_COMMAND, bytes((int(enabled),)))
+
+
 def parse_h7172_power_reply(frame: bytes) -> bool | None:
     """Return power from an H7172 read/write reply, or ``None`` if unrelated."""
     if len(frame) != _FRAME_SIZE or xor_checksum(frame[:19]) != frame[19]:

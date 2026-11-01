@@ -37,7 +37,44 @@ from .music_semantics import (
 )
 
 DOMAIN = "govee_unified"
-APPLIANCE_MODELS = frozenset({"H7172", "H7178", "H717D"})
+ICE_MAKER_MODELS = frozenset({"H7172", "H7178", "H717D"})
+# APK modules that instantiate the shared base2light SwitchController.  Its
+# local BLE serializer is the standard signed ``33 01 <on/off>`` frame.
+# Keep device-specific modes, sensors and safety interlocks out until their
+# own parser/controller has been ported; this list deliberately exposes only
+# the common, APK-confirmed primary-power operation.
+SIMPLE_POWER_APPLIANCE_MODELS = frozenset(
+    {
+        "H7105",
+        "H7106",
+        "H7111",
+        "H7120",
+        "H7121",
+        "H7122",
+        "H7123",
+        "H7126",
+        "H7129",
+        "H7130",
+        "H7132",
+        "H7133",
+        "H7135",
+        "H7140",
+        "H7141",
+        "H7142",
+        "H7143",
+        "H7145",
+        "H7149",
+        "H7150",
+        "H7151",
+        "H7160",
+        "H7161",
+        "H7170",
+        "H7171",
+        "H7173",
+        "H7175",
+    }
+)
+APPLIANCE_MODELS = ICE_MAKER_MODELS | SIMPLE_POWER_APPLIANCE_MODELS
 CONF_LAN_IP = "lan_ip"
 CONF_LAN_DEVICE_ID = "lan_device_id"
 CONF_LAN_SKU = "lan_sku"

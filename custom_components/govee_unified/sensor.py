@@ -8,6 +8,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from . import GoveeBLEConfigEntry
 from .appliance_coordinator import GoveeApplianceCoordinator
 from .appliance_entity import GoveeApplianceEntity
+from .const import ICE_MAKER_MODELS
 from .coordinator import GoveeBLECoordinator
 from .effect_contracts import CapabilityState
 from .entity import GoveeBLEEntity
@@ -21,7 +22,8 @@ async def async_setup_entry(
 ) -> None:
     coordinator = entry.runtime_data
     if isinstance(coordinator, GoveeApplianceCoordinator):
-        async_add_entities([GoveeIceMakerWorkStatus(coordinator)])
+        if coordinator.model in ICE_MAKER_MODELS:
+            async_add_entities([GoveeIceMakerWorkStatus(coordinator)])
         return
     if coordinator.model != "H6199":
         return

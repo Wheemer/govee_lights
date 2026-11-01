@@ -30,6 +30,8 @@ def test_h7172_apk_power_frames_are_signed_20_byte_commands() -> None:
     assert protocol.build_h7172_power_query().hex() == "aa010000000000000000000000000000000000ab"
     assert protocol.build_h7172_power_write(True).hex() == "3301010100000000000000000000000000000032"
     assert protocol.build_h7172_power_write(False).hex() == "3301000000000000000000000000000000000032"
+    assert protocol.build_standard_power_write(True).hex() == "3301010000000000000000000000000000000033"
+    assert protocol.build_standard_power_write(False).hex() == "3301000000000000000000000000000000000032"
 
 
 def test_h7172_status_parsers_reject_invalid_or_unrelated_frames() -> None:

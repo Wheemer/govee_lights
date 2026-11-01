@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -32,6 +32,7 @@ from .const import DOMAIN
 from .coordinator import GoveeCoordinator
 from .govee import GoveeHelper
 from .govee_ble import GoveeBLE
+from .lan_capabilities import get_lan_capability_profile
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -170,7 +171,16 @@ class GoveeLANCoordinator(GoveeCoordinator):
         # govee-local-api's per-SKU table, available before the device is
         # bound - segment entities are created at setup, not on discovery.
         capabilities = GOVEE_LIGHT_CAPABILITIES.get(sku)
-        self._segment_count = capabilities.segments_count if capabilities else 0
+        # Unknown SKUs are intentionally on/off-only in govee-local-api. Do
+        # not expose RGB/CT controls just because the transport discovered a
+        # device; the library has no evidence that it accepts those commands.
+        capability_features = int(capabilities.features) if capabilities else 0
+        capability_segments = capabilities.segments_count if capabilities else 0
+        capability_range = tuple(capabilities.temperature_range) if capabilities else (2000, 9000)
+        self._lan_capabilities = get_lan_capability_profile(
+            capability_features, capability_segments, capability_range
+        )
+        self._segment_count = self._lan_capabilities.segment_count
         self.segment_colors = [None] * self._segment_count
 
         self._send_lock = asyncio.Lock()
@@ -232,15 +242,20 @@ class GoveeLANCoordinator(GoveeCoordinator):
 
     @property
     def supported_color_modes(self) -> set[ColorMode]:
-        return {ColorMode.RGB, ColorMode.COLOR_TEMP}
+        modes: set[ColorMode] = set()
+        if self._lan_capabilities.supports_rgb:
+            modes.add(ColorMode.RGB)
+        if self._lan_capabilities.supports_color_temp:
+            modes.add(ColorMode.COLOR_TEMP)
+        return modes or {ColorMode.ONOFF}
 
     @property
     def min_color_temp_kelvin(self) -> int | None:
-        return 2000
+        return self._lan_capabilities.min_color_temp_kelvin
 
     @property
     def max_color_temp_kelvin(self) -> int | None:
-        return 9000
+        return self._lan_capabilities.max_color_temp_kelvin
 
     @property
     def supports_music_modes(self) -> bool:
@@ -602,7 +617,7 @@ class GoveeLANCoordinator(GoveeCoordinator):
             return
 
         if self._available:
-            age = (datetime.now(timezone.utc) - self.device.lastseen).total_seconds()
+            age = (datetime.now(UTC) - self.device.lastseen).total_seconds()
             if age > LAN_OFFLINE_AFTER_SECONDS:
                 _LOGGER.info("LAN device %s (%s) is unreachable", self.sku, self.ip)
                 self._available = False

@@ -24,12 +24,19 @@ jobs:
       - name: Compile integration sources
         run: python -m compileall -q custom_components/govee_lights tests
       - name: Run pure protocol and profile regressions
-        run: python -m pytest -q tests/test_models.py tests/test_legacy_protocol.py
+        run: >-
+          python -m pytest -q
+          tests/test_models.py
+          tests/test_legacy_protocol.py
+          tests/test_lan_capabilities.py
       - name: Lint changed protocol surface
         run: >-
           ruff check --ignore E501
           custom_components/govee_lights/models.py
           custom_components/govee_lights/legacy_protocol.py
+          custom_components/govee_lights/lan_capabilities.py
           custom_components/govee_lights/govee_ble.py
+          custom_components/govee_lights/govee_lan.py
           tests/test_models.py
           tests/test_legacy_protocol.py
+          tests/test_lan_capabilities.py

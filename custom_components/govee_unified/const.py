@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any
 
+from .h613e_protocol import transform_h613e_static_packet
 from .h6199_calibration import WHITE_BALANCE_POSITIONS
 from .music_semantics import (
     H1A42_MUSIC_VARIANTS,
@@ -154,6 +155,14 @@ class ModelProfile:
     bulk_status_grammar: str | None = None
     setting_grammar: str | None = None
     outbound_transform: Callable[[bytes], bytes] | None = None
+    # A small number of legacy devices require GATT write acknowledgement for
+    # static control; this is independent of protocol command acknowledgements.
+    write_with_response: bool = False
+    # Some legacy control services reject their first write until descriptors
+    # have settled after connection. Zero keeps the standard immediate path.
+    connection_settle_seconds: float = 0.0
+    # H613E requires the app's full control-service CCCD setup before writing.
+    subscribe_all_control_notifications: bool = False
     # Device register range for the brightness byte; None means the wire carries percent.
     brightness_wire_range: tuple[int, int] | None = None
     # AA05 selector byte the device accepts for the active-mode query.
@@ -304,6 +313,12 @@ class ModelProfile:
             or self.packet_write_delay < 0
         ):
             raise ValueError("packet write delay must be non-negative")
+        if (
+            isinstance(self.connection_settle_seconds, bool)
+            or not isinstance(self.connection_settle_seconds, int | float)
+            or self.connection_settle_seconds < 0
+        ):
+            raise ValueError("connection settle delay must be non-negative")
         if type(self.dreamview_max_sub_devices) is not int or not 0 <= self.dreamview_max_sub_devices <= 255:
             raise ValueError("DreamView member capacity must be from 0 to 255")
         if self.physical_ic_count is not None and (
@@ -394,7 +409,12 @@ class ModelProfile:
 
     @property
     def requires_notifications(self) -> bool:
-        return bool(self.read_domains or self.dreamview_reads or self.boolean_controls)
+        return bool(
+            self.read_domains
+            or self.dreamview_reads
+            or self.boolean_controls
+            or self.subscribe_all_control_notifications
+        )
 
     @property
     def state_readable(self) -> bool:
@@ -700,6 +720,26 @@ _H6072_PROFILE = ModelProfile(
 )
 
 MODEL_PROFILES: dict[str, ModelProfile] = {
+    # H613E is a bounded legacy-0D profile. Its APK-derived RGB and Kelvin
+    # payloads exactly match H600A's whole-bulb static envelope, but its
+    # AA 05 00 reply is a write acknowledgement rather than a state update.
+    # Do not borrow H600A's status/effect grammar or scene catalogue.
+    "H613E": ModelProfile(
+        "H613E LED Strip",
+        support_quality=SupportQuality.SUPPORTED,
+        command_grammar="H600A",
+        command_operations=frozenset({"power", "brightness", "static"}),
+        outbound_transform=transform_h613e_static_packet,
+        write_with_response=True,
+        connection_settle_seconds=0.7,
+        subscribe_all_control_notifications=True,
+        supports_rgb=True,
+        supports_color_temperature=True,
+        min_color_temp_kelvin=2000,
+        max_color_temp_kelvin=9000,
+        whole_device_mask=1,
+        connection_idle_timeout=3.0,
+    ),
     "H600A": ModelProfile(
         "H600A Smart LED Bulb",
         support_quality=SupportQuality.SUPPORTED,

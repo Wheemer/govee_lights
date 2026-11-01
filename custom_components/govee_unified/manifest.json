@@ -3,6 +3,30 @@
   "name": "Govee Unified",
   "bluetooth": [
     {
+      "local_name": "ihoment_H613E*"
+    },
+    {
+      "local_name": "Govee_H613E*"
+    },
+    {
+      "local_name": "Minger_H613E*"
+    },
+    {
+      "local_name": "GBK_H613E*"
+    },
+    {
+      "local_name": "GVH_H613E*"
+    },
+    {
+      "local_name": "GVH613E*"
+    },
+    {
+      "local_name": "GV613E*"
+    },
+    {
+      "local_name": "H613E_*"
+    },
+    {
       "local_name": "ihoment_H600A*"
     },
     {

@@ -101,7 +101,7 @@ from .protocol_h6199 import H6199_NATIVE_CONTROLS, build_h6199_control, build_h6
 from .scenes import (
     scene_code_is_ambiguous,
 )
-from .transport import READ_UUID, WRITE_UUID
+from .transport import CONTROL_SERVICE_UUID, READ_UUID, WRITE_UUID
 from .video_applicability import (
     h6199_camera_controls_state,
     identity_version,
@@ -808,6 +808,10 @@ class GoveeBLECoordinator(
                 await self._start_notify()
                 self._require_not_shutdown()
                 self._require_not_dreamview_claimed()
+            if self.profile.connection_settle_seconds:
+                await asyncio.sleep(self.profile.connection_settle_seconds)
+                self._require_not_shutdown()
+                self._require_not_dreamview_claimed()
             await self._encryption.async_negotiate(client)
             self._require_not_shutdown()
             self._require_not_dreamview_claimed()
@@ -975,7 +979,26 @@ class GoveeBLECoordinator(
             if self._client is client and self._notification_token is token and client.is_connected:
                 self._notify_callback(sender, data)
 
-        await client.start_notify(READ_UUID, receive)
+        characteristic_uuids = [READ_UUID]
+        if self.profile.subscribe_all_control_notifications:
+            service = client.services.get_service(CONTROL_SERVICE_UUID)
+            if service is not None:
+                characteristic_uuids.extend(
+                    characteristic.uuid
+                    for characteristic in service.characteristics
+                    if characteristic.uuid not in characteristic_uuids
+                    and {"notify", "indicate"}.intersection(characteristic.properties)
+                )
+        for characteristic_uuid in characteristic_uuids:
+            try:
+                await client.start_notify(characteristic_uuid, receive)
+            except BleakError:
+                # The primary control notification is required by the generic
+                # profile. H613E's extra CCCDs are best-effort, matching the
+                # original proven implementation.
+                if characteristic_uuid == READ_UUID:
+                    raise
+                _LOGGER.debug("Optional H613E notification unavailable: %s", characteristic_uuid)
         if self._client is not client or self._notification_token is not token:
             raise GoveeCryptoError("disconnected_during_subscription")
         self._notify_started_monotonic = time.monotonic()
@@ -1124,7 +1147,7 @@ class GoveeBLECoordinator(
             on_write()
         token = self._notification_token
         try:
-            await client.write_gatt_char(WRITE_UUID, wire_packet, response=False)
+            await client.write_gatt_char(WRITE_UUID, wire_packet, response=self.profile.write_with_response)
             self._require_not_shutdown()
         except asyncio.CancelledError:
             if self._encryption is not None:

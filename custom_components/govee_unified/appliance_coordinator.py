@@ -12,16 +12,17 @@ from homeassistant.core import CALLBACK_TYPE, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-
 from .appliance_protocol import (
     build_h7172_power_query,
     build_h7172_power_write,
+    build_kettle_temperature_query,
     build_standard_power_write,
     parse_h7172_power_reply,
     parse_h7172_work_status,
+    parse_kettle_temperature_reply,
 )
 from .ble_connection import async_establish_ble_connection
-from .const import DOMAIN, ICE_MAKER_MODELS
+from .const import DOMAIN, ICE_MAKER_MODELS, KETTLE_TEMPERATURE_MODELS
 from .transport import READ_UUID, WRITE_UUID
 
 _LOGGER = logging.getLogger(__name__)
@@ -41,9 +42,11 @@ class GoveeApplianceCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.model = model
         self.is_on: bool | None = None
         self.work_status: str = "unknown"
+        self.temperature_c: float | None = None
         self._client: BleakClient | None = None
         self._lock = asyncio.Lock()
         self._power_reply = asyncio.Event()
+        self._temperature_reply = asyncio.Event()
         self._cancel_disconnect: CALLBACK_TYPE | None = None
         self._disconnect_generation = 0
 
@@ -69,6 +72,14 @@ class GoveeApplianceCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     # The APK permits connection even if a status response is delayed;
                     # retain a prior state rather than inventing one.
                     pass
+                if self.model in KETTLE_TEMPERATURE_MODELS:
+                    self._temperature_reply.clear()
+                    await self._write(build_kettle_temperature_query())
+                    try:
+                        async with asyncio.timeout(3):
+                            await self._temperature_reply.wait()
+                    except TimeoutError:
+                        pass
                 snapshot = self._snapshot()
                 self._reset_disconnect_timer()
                 return snapshot
@@ -115,11 +126,19 @@ class GoveeApplianceCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         status = parse_h7172_work_status(frame)
         if status is not None:
             self.work_status = status
-        if power is not None or status is not None:
+        temperature = parse_kettle_temperature_reply(frame)
+        if temperature is not None:
+            self.temperature_c = temperature
+            self._temperature_reply.set()
+        if power is not None or status is not None or temperature is not None:
             self.async_set_updated_data(self._snapshot())
 
     def _snapshot(self) -> dict[str, Any]:
-        return {"is_on": self.is_on, "work_status": self.work_status}
+        return {
+            "is_on": self.is_on,
+            "work_status": self.work_status,
+            "temperature_c": self.temperature_c,
+        }
 
     def _reset_disconnect_timer(self) -> None:
         if self._cancel_disconnect is not None:

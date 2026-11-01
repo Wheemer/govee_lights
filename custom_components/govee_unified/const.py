@@ -38,6 +38,10 @@ from .music_semantics import (
 
 DOMAIN = "govee_unified"
 ICE_MAKER_MODELS = frozenset({"H7172", "H7178", "H717D"})
+# Govee Home 7.5.30 gives these kettle models the same dedicated
+# RealTimeTemController.  It reads command 0x10 and converts the signed
+# big-endian value to Celsius by dividing by 100.
+KETTLE_TEMPERATURE_MODELS = frozenset({"H7170", "H7171", "H7175"})
 # APK modules that instantiate the shared base2light SwitchController.  Its
 # local BLE serializer is the standard signed ``33 01 <on/off>`` frame.
 # Keep device-specific modes, sensors and safety interlocks out until their

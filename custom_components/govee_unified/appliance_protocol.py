@@ -13,6 +13,7 @@ from .transport import xor_checksum
 
 _FRAME_SIZE = 20
 _H7172_POWER_COMMAND = 0x01
+_KETTLE_TEMPERATURE_COMMAND = 0x10
 
 # APK WorkStatus values from com.govee.h7172.adjust.WorkStatus.
 H7172_WORK_STATUS = {
@@ -39,6 +40,11 @@ def build_legacy_frame(prefix: int, command: int, payload: bytes = b"") -> bytes
 def build_h7172_power_query() -> bytes:
     """Query H7172/H7178/H717D power state (APK AbsSingleController read)."""
     return build_legacy_frame(0xAA, _H7172_POWER_COMMAND)
+
+
+def build_kettle_temperature_query() -> bytes:
+    """Build the APK H7170/H7171/H7175 RealTimeTemController read frame."""
+    return build_legacy_frame(0xAA, _KETTLE_TEMPERATURE_COMMAND)
 
 
 def build_h7172_power_write(enabled: bool) -> bytes:
@@ -79,3 +85,17 @@ def parse_h7172_work_status(frame: bytes) -> str | None:
     if frame[:2] != b"\xaa\x19":
         return None
     return H7172_WORK_STATUS.get(frame[2], "unknown")
+
+
+def parse_kettle_temperature_reply(frame: bytes) -> float | None:
+    """Decode the shared APK ``RealTimeTemController`` reply.
+
+    ``AbsSingleController`` passes the response body beginning at raw byte 2
+    to this controller; its source reads body bytes 1--2 as a signed
+    big-endian integer.  The three kettle modules divide that integer by 100.
+    """
+    if len(frame) != _FRAME_SIZE or xor_checksum(frame[:19]) != frame[19]:
+        return None
+    if frame[:2] != bytes((0xAA, _KETTLE_TEMPERATURE_COMMAND)):
+        return None
+    return int.from_bytes(frame[3:5], byteorder="big", signed=True) / 100

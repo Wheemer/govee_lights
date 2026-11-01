@@ -40,3 +40,12 @@ def test_h7172_status_parsers_reject_invalid_or_unrelated_frames() -> None:
     assert protocol.parse_h7172_power_reply(b"\xaa\x01") is None
     assert protocol.parse_h7172_work_status(bytes.fromhex("aa190300000000000000000000000000000000b0")) == "washing"
     assert protocol.parse_h7172_work_status(bytes.fromhex("aa190900000000000000000000000000000000ba")) == "unknown"
+
+
+def test_shared_kettle_temperature_query_and_hundredths_reply() -> None:
+    assert protocol.build_kettle_temperature_query().hex() == "aa100000000000000000000000000000000000ba"
+    # The first response-body byte is deliberately skipped by Govee's
+    # RealTimeTemController; bytes 3--4 are a signed Celsius-hundredths value.
+    assert protocol.parse_kettle_temperature_reply(bytes.fromhex("aa100023450000000000000000000000000000dc")) == 90.29
+    assert protocol.parse_kettle_temperature_reply(bytes.fromhex("aa1000ff9c0000000000000000000000000000d9")) == -1.0
+    assert protocol.parse_kettle_temperature_reply(b"\xaa\x10") is None

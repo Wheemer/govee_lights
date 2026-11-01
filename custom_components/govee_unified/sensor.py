@@ -9,7 +9,7 @@ from . import GoveeBLEConfigEntry
 from .appliance_coordinator import GoveeApplianceCoordinator
 from .appliance_entity import GoveeApplianceEntity
 from .appliance_entity import GoveePassiveSensorEntity
-from .const import ICE_MAKER_MODELS
+from .const import ICE_MAKER_MODELS, KETTLE_TEMPERATURE_MODELS
 from .coordinator import GoveeBLECoordinator
 from .passive_sensor_coordinator import GoveePassiveSensorCoordinator
 from .sensor_protocol import (
@@ -60,6 +60,8 @@ async def async_setup_entry(
     if isinstance(coordinator, GoveeApplianceCoordinator):
         if coordinator.model in ICE_MAKER_MODELS:
             async_add_entities([GoveeIceMakerWorkStatus(coordinator)])
+        elif coordinator.model in KETTLE_TEMPERATURE_MODELS:
+            async_add_entities([GoveeKettleTemperatureSensor(coordinator)])
         return
     if coordinator.model != "H6199":
         return
@@ -106,6 +108,24 @@ class GoveeIceMakerWorkStatus(GoveeApplianceEntity, SensorEntity):
     @property
     def native_value(self) -> str:
         return self.coordinator.work_status
+
+
+class GoveeKettleTemperatureSensor(GoveeApplianceEntity, SensorEntity):
+    """Current kettle water temperature from the APK shared BLE controller."""
+
+    _attr_name = "Water Temperature"
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_native_unit_of_measurement = "°C"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: GoveeApplianceCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.address.replace(':', '').lower()}_water_temperature"
+        self._attr_device_info = coordinator.device_info
+
+    @property
+    def native_value(self) -> float | None:
+        return self.coordinator.temperature_c
 
 
 class _GoveePassiveClimateSensor(GoveePassiveSensorEntity, SensorEntity):

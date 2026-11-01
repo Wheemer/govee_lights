@@ -133,11 +133,9 @@ class GoveeConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_lan(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Delegate local Wi-Fi discovery to the bulk-ported LAN flow."""
-        from .lan_config_flow import GoveeConfigFlow as LanConfigFlow
+        from .lan_config_flow import async_step_lan
 
-        if not hasattr(self, "_lan_discovered"):
-            self._lan_discovered = {}
-        return await LanConfigFlow.async_step_lan(self, user_input)
+        return await async_step_lan(self, user_input)
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         entry = self._get_reconfigure_entry()

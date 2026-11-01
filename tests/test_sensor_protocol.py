@@ -50,6 +50,15 @@ def test_environment_sensor_batch_decodes_co2_and_pm25() -> None:
     )
 
 
+def test_h5179_decodes_its_distinct_and_compact_advertisement_layouts() -> None:
+    assert protocol.parse_climate_advertisement("Govee_H5179_3CD5", {34817: bytes.fromhex("ec0001010a0aa40664")}) == protocol.ClimateAdvertisement(
+        "H5179", 25.7, 17.0, 100
+    )
+    assert protocol.parse_climate_advertisement("GV5179_6319", {1: bytes.fromhex("010103b31464")}) == protocol.ClimateAdvertisement(
+        "H5179", 24.2, 45.2, 100
+    )
+
+
 def test_h5127_presence_advertisement_is_strictly_payload_gated() -> None:
     assert protocol.parse_presence_advertisement("Govee_H5127_0001", {0x8843: bytes.fromhex("ec0002010111")}) == protocol.PresenceAdvertisement("H5127", True, True)
     assert protocol.parse_presence_advertisement("Govee_H5127_0001", {0x8843: bytes.fromhex("ec0002010010")}) == protocol.PresenceAdvertisement("H5127", False, False)

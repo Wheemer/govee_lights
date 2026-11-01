@@ -100,6 +100,9 @@ def sensor_model_from_ble_name(name: str | None) -> str | None:
     # Unlike the other Govee names it omits the literal model-prefix H.
     if "5140" in normalized:
         return "H5140"
+    # H5179 has both ``Govee_H5179`` and compact ``GV5179`` advertisements.
+    if "5179" in normalized:
+        return "H5179"
     for model in PASSIVE_ENCRYPTED_EVENT_SENSOR_MODELS:
         if model[1:] in normalized:
             return model
@@ -145,6 +148,9 @@ def parse_climate_advertisement(name: str | None, manufacturer_data: Mapping[int
             temperature, humidity, error = temp_raw / 100, humidity_raw / 100, False
         elif model in _TEMP_HUMID_9 and len(payload) == 9:
             temp_raw, humidity_raw, battery = _PACKED_TEMP_HUMID_BATTERY.unpack(payload[1:6])
+            temperature, humidity, error = temp_raw / 100, humidity_raw / 100, False
+        elif model == "H5179" and len(payload) == 9:
+            temp_raw, humidity_raw, battery = _PACKED_TEMP_HUMID_BATTERY.unpack(payload[4:9])
             temperature, humidity, error = temp_raw / 100, humidity_raw / 100, False
         elif model in _TEMP_HUMID_PACKED and len(payload) in {6, 8}:
             temperature, humidity, battery, error = _decode_packed_temp_humidity(payload[2:6])

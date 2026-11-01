@@ -20,6 +20,9 @@ adapted.  Reimplement protocol behavior with this integration's own tests;
 do not copy undocumented packet code without a frame-level test and a declared
 device family.
 
+The server-held APK evidence and the distinction between an app asset and an
+observed serializer are tracked in [BLE_EVIDENCE.md](BLE_EVIDENCE.md).
+
 ## Transport boundary
 
 `govee_lights` currently owns direct BLE and Govee LAN lighting.  The following

@@ -31,3 +31,14 @@ def test_little_endian_sensor_formats_are_model_gated() -> None:
 
 def test_invalid_error_flag_or_out_of_range_reading_is_not_published() -> None:
     assert protocol.parse_climate_advertisement("GVH5075_2762", {60552: bytes.fromhex("000341c2e400")}) is None
+
+
+def test_probe_sensor_batch_decodes_fixed_and_rotating_probe_layouts() -> None:
+    h5182 = bytes(8) + bytes.fromhex("00fa00000000c80000")
+    assert protocol.parse_probe_advertisement("Govee_H5182_0001", {0x2730: h5182}) == protocol.ProbeAdvertisement(
+        "H5182", {1: 2.5, 2: 2.0}
+    )
+    h5184 = bytes(6) + b"\x02" + bytes(1) + bytes.fromhex("00fa00000000c80000")
+    assert protocol.parse_probe_advertisement("Govee_H5184_0001", {0x1B36: h5184}) == protocol.ProbeAdvertisement(
+        "H5184", {3: 2.5, 4: 2.0}
+    )

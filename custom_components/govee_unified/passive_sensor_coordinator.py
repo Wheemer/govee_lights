@@ -11,12 +11,12 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import DOMAIN
-from .sensor_protocol import ClimateAdvertisement, parse_climate_advertisement
+from .sensor_protocol import ClimateAdvertisement, ProbeAdvertisement, parse_passive_sensor_advertisement
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class GoveePassiveSensorCoordinator(DataUpdateCoordinator[ClimateAdvertisement | None]):
+class GoveePassiveSensorCoordinator(DataUpdateCoordinator[ClimateAdvertisement | ProbeAdvertisement | None]):
     """Maintain state from BLE advertisements without opening GATT."""
 
     def __init__(self, hass, address: str, model: str) -> None:
@@ -42,7 +42,7 @@ class GoveePassiveSensorCoordinator(DataUpdateCoordinator[ClimateAdvertisement |
             bluetooth.BluetoothScanningMode.PASSIVE,
         )
 
-    async def _async_update_data(self) -> ClimateAdvertisement | None:
+    async def _async_update_data(self) -> ClimateAdvertisement | ProbeAdvertisement | None:
         info = bluetooth.async_last_service_info(self.hass, self.address, connectable=False)
         return self._parse(info) if info is not None else self.data
 
@@ -53,8 +53,8 @@ class GoveePassiveSensorCoordinator(DataUpdateCoordinator[ClimateAdvertisement |
         if reading := self._parse(info):
             self.async_set_updated_data(reading)
 
-    def _parse(self, info: bluetooth.BluetoothServiceInfoBleak) -> ClimateAdvertisement | None:
-        reading = parse_climate_advertisement(info.name, info.manufacturer_data)
+    def _parse(self, info: bluetooth.BluetoothServiceInfoBleak) -> ClimateAdvertisement | ProbeAdvertisement | None:
+        reading = parse_passive_sensor_advertisement(info.name, info.manufacturer_data)
         if reading is None or reading.model != self.model:
             return None
         return reading

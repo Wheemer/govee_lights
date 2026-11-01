@@ -53,7 +53,7 @@ from .effect_setup import get_effect_backend
 from .firmware_version import FirmwareVersion
 from .h6102_protocol import H6102_PACTS
 from .schema_compat import vol
-from .sensor_protocol import PASSIVE_CLIMATE_SENSOR_MODELS, sensor_model_from_ble_name
+from .sensor_protocol import PASSIVE_SENSOR_MODELS, sensor_model_from_ble_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -283,7 +283,7 @@ class GoveeConfigFlow(ConfigFlow, domain=DOMAIN):
     def _show_user_form(
         self, *, errors: dict[str, str] | None = None, step_id: str = "user"
     ) -> ConfigFlowResult:
-        models = [*MODEL_PROFILES.keys(), *sorted(APPLIANCE_MODELS), *sorted(PASSIVE_CLIMATE_SENSOR_MODELS)]
+        models = [*MODEL_PROFILES.keys(), *sorted(APPLIANCE_MODELS), *sorted(PASSIVE_SENSOR_MODELS)]
         return self.async_show_form(
             step_id=step_id,
             data_schema=vol.Schema(
@@ -302,7 +302,7 @@ class GoveeConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] | None = None,
     ) -> ConfigFlowResult:
         current = entry.data.get(CONF_MODEL)
-        models = [*MODEL_PROFILES.keys(), *sorted(APPLIANCE_MODELS), *sorted(PASSIVE_CLIMATE_SENSOR_MODELS)]
+        models = [*MODEL_PROFILES.keys(), *sorted(APPLIANCE_MODELS), *sorted(PASSIVE_SENSOR_MODELS)]
         default = current if isinstance(current, str) and current in models else models[0]
         return self.async_show_form(
             step_id="reconfigure",

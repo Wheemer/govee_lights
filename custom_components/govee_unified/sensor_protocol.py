@@ -24,6 +24,10 @@ _TEMP_HUMID_PACKED = frozenset(
 )
 
 PASSIVE_CLIMATE_SENSOR_MODELS = _TEMP_HUMID_6 | _TEMP_HUMID_7 | _TEMP_HUMID_9 | _TEMP_HUMID_PACKED
+PASSIVE_PROBE_SENSOR_MODELS = frozenset({"H5181", "H5182", "H5183", "H5184", "H5185", "H5191", "H5198"})
+PASSIVE_SENSOR_MODELS = PASSIVE_CLIMATE_SENSOR_MODELS | PASSIVE_PROBE_SENSOR_MODELS
+_PROBE_COUNT = {"H5181": 1, "H5182": 2, "H5183": 1, "H5184": 4, "H5185": 2, "H5191": 1, "H5198": 4}
+_FOUR_PROBE_IDS = {1: (1, 2), 65: (1, 2), 129: (1, 2), 193: (1, 2), 2: (3, 4), 66: (3, 4), 130: (3, 4), 194: (3, 4)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +40,14 @@ class ClimateAdvertisement:
     battery_pct: int
 
 
+@dataclass(frozen=True, slots=True)
+class ProbeAdvertisement:
+    """Temperatures broadcast by a Govee wired-probe sensor."""
+
+    model: str
+    probes_c: dict[int, float]
+
+
 def sensor_model_from_ble_name(name: str | None) -> str | None:
     """Return a supported passive-climate model encoded in a local name."""
     if not name:
@@ -44,7 +56,7 @@ def sensor_model_from_ble_name(name: str | None) -> str | None:
     if match is None:
         return None
     model = match.group(0)
-    return model if model in PASSIVE_CLIMATE_SENSOR_MODELS else None
+    return model if model in PASSIVE_SENSOR_MODELS else None
 
 
 def _decode_packed_temp_humidity(data: bytes) -> tuple[float, float, int, bool]:
@@ -83,3 +95,50 @@ def parse_climate_advertisement(name: str | None, manufacturer_data: Mapping[int
             continue
         return ClimateAdvertisement(model, temperature, humidity, battery)
     return None
+
+
+def probe_count(model: str) -> int:
+    """Return the maximum number of advertised probes for a supported model."""
+    return _PROBE_COUNT[model]
+
+
+def _probe_temperature(value: int) -> float | None:
+    return None if value < 0 else value / 100
+
+
+def parse_probe_advertisement(name: str | None, manufacturer_data: Mapping[int, bytes]) -> ProbeAdvertisement | None:
+    """Decode fixed-layout wired-probe formats from the MIT reference parser."""
+    model = sensor_model_from_ble_name(name)
+    if model not in PASSIVE_PROBE_SENSOR_MODELS:
+        return None
+    for payload in manufacturer_data.values():
+        probes: dict[int, float | None]
+        if model in {"H5181", "H5183"} and len(payload) == 14:
+            (first, _alarm) = struct.unpack(">hh", payload[8:12])
+            probes = {1: _probe_temperature(first)}
+        elif model == "H5182" and len(payload) == 17:
+            first, _first_alarm, _gap, second, _second_alarm = struct.unpack(">hhbhh", payload[8:17])
+            probes = {1: _probe_temperature(first), 2: _probe_temperature(second)}
+        elif model == "H5185" and len(payload) == 20:
+            first, _first_alarm, _gap, second, _second_alarm = struct.unpack(">hhhhh", payload[8:18])
+            probes = {1: _probe_temperature(first), 2: _probe_temperature(second)}
+        elif model == "H5191" and len(payload) == 20:
+            first, _alarm, _gap, _ambient = struct.unpack(">hhhh", payload[8:16])
+            probes = {1: _probe_temperature(first)}
+        elif model in {"H5184", "H5198"} and len(payload) in {17, 20}:
+            ids = _FOUR_PROBE_IDS.get(payload[6])
+            if ids is None:
+                continue
+            first, _first_alarm, _gap, second, _second_alarm = struct.unpack(">hhbhh", payload[8:17])
+            probes = {ids[0]: _probe_temperature(first), ids[1]: _probe_temperature(second)}
+        else:
+            continue
+        valid = {probe: temperature for probe, temperature in probes.items() if temperature is not None}
+        if valid:
+            return ProbeAdvertisement(model, valid)
+    return None
+
+
+def parse_passive_sensor_advertisement(name: str | None, manufacturer_data: Mapping[int, bytes]) -> ClimateAdvertisement | ProbeAdvertisement | None:
+    """Decode any currently supported advertisement-only Govee sensor family."""
+    return parse_climate_advertisement(name, manufacturer_data) or parse_probe_advertisement(name, manufacturer_data)

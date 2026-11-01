@@ -12,6 +12,7 @@ from .appliance_entity import GoveePassiveSensorEntity
 from .const import ICE_MAKER_MODELS
 from .coordinator import GoveeBLECoordinator
 from .passive_sensor_coordinator import GoveePassiveSensorCoordinator
+from .sensor_protocol import PASSIVE_CLIMATE_SENSOR_MODELS, PASSIVE_PROBE_SENSOR_MODELS, ProbeAdvertisement, probe_count
 from .effect_contracts import CapabilityState
 from .entity import GoveeBLEEntity
 from .video_applicability import h6199_camera_controls_state
@@ -24,13 +25,14 @@ async def async_setup_entry(
 ) -> None:
     coordinator = entry.runtime_data
     if isinstance(coordinator, GoveePassiveSensorCoordinator):
-        async_add_entities(
-            [
+        if coordinator.model in PASSIVE_CLIMATE_SENSOR_MODELS:
+            async_add_entities([
                 GoveePassiveTemperatureSensor(coordinator),
                 GoveePassiveHumiditySensor(coordinator),
                 GoveePassiveBatterySensor(coordinator),
-            ]
-        )
+            ])
+        elif coordinator.model in PASSIVE_PROBE_SENSOR_MODELS:
+            async_add_entities([GoveePassiveProbeTemperatureSensor(coordinator, probe) for probe in range(1, probe_count(coordinator.model) + 1)])
         return
     if isinstance(coordinator, GoveeApplianceCoordinator):
         if coordinator.model in ICE_MAKER_MODELS:
@@ -131,3 +133,23 @@ class GoveePassiveBatterySensor(_GoveePassiveClimateSensor):
     @property
     def native_value(self) -> int | None:
         return self.coordinator.data.battery_pct if self.coordinator.data is not None else None
+
+
+class GoveePassiveProbeTemperatureSensor(GoveePassiveSensorEntity, SensorEntity):
+    """One temperature probe reported by a passive Govee probe sensor."""
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_native_unit_of_measurement = "°C"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: GoveePassiveSensorCoordinator, probe: int) -> None:
+        super().__init__(coordinator)
+        self._probe = probe
+        self._attr_name = f"Probe {probe} Temperature"
+        self._attr_unique_id = f"{coordinator.address.replace(':', '').lower()}_probe_{probe}_temperature"
+        self._attr_device_info = coordinator.device_info
+
+    @property
+    def native_value(self) -> float | None:
+        data = self.coordinator.data
+        return data.probes_c.get(self._probe) if isinstance(data, ProbeAdvertisement) else None

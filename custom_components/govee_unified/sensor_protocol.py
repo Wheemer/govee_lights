@@ -55,6 +55,8 @@ class ProbeAdvertisement:
     model: str
     probes_c: dict[int, float]
     ambient_c: float | None = None
+    high_alarm_c: dict[int, float] | None = None
+    low_alarm_c: dict[int, float] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,29 +202,48 @@ def parse_probe_advertisement(name: str | None, manufacturer_data: Mapping[int, 
         return None
     for payload in manufacturer_data.values():
         probes: dict[int, float | None]
+        high: dict[int, float | None] = {}
+        low: dict[int, float | None] = {}
         if model in {"H5181", "H5183"} and len(payload) == 14:
-            (first, _alarm) = struct.unpack(">hh", payload[8:12])
+            first, alarm = struct.unpack(">hh", payload[8:12])
             probes = {1: _probe_temperature(first)}
+            high = {1: _probe_temperature(alarm)}
         elif model == "H5182" and len(payload) == 17:
-            first, _first_alarm, _gap, second, _second_alarm = struct.unpack(">hhbhh", payload[8:17])
+            first, first_alarm, _gap, second, second_alarm = struct.unpack(">hhbhh", payload[8:17])
             probes = {1: _probe_temperature(first), 2: _probe_temperature(second)}
+            high = {1: _probe_temperature(first_alarm), 2: _probe_temperature(second_alarm)}
         elif model == "H5185" and len(payload) == 20:
-            first, _first_alarm, _gap, second, _second_alarm = struct.unpack(">hhhhh", payload[8:18])
+            first, first_alarm, _gap, second, second_alarm = struct.unpack(">hhhhh", payload[8:18])
             probes = {1: _probe_temperature(first), 2: _probe_temperature(second)}
+            high = {1: _probe_temperature(first_alarm), 2: _probe_temperature(second_alarm)}
         elif model == "H5191" and len(payload) == 20:
-            first, _alarm, _gap, ambient = struct.unpack(">hhhh", payload[8:16])
+            first, alarm, _gap, ambient = struct.unpack(">hhhh", payload[8:16])
             probes = {1: _probe_temperature(first)}
-        elif model in {"H5184", "H5198"} and len(payload) in {17, 20}:
+            high = {1: _probe_temperature(alarm)}
+        elif model == "H5184" and len(payload) == 17:
             ids = _FOUR_PROBE_IDS.get(payload[6])
             if ids is None:
                 continue
-            first, _first_alarm, _gap, second, _second_alarm = struct.unpack(">hhbhh", payload[8:17])
+            first, first_alarm, _gap, second, second_alarm = struct.unpack(">hhbhh", payload[8:17])
             probes = {ids[0]: _probe_temperature(first), ids[1]: _probe_temperature(second)}
+            high = {ids[0]: _probe_temperature(first_alarm), ids[1]: _probe_temperature(second_alarm)}
+        elif model == "H5198" and len(payload) == 20:
+            ids = _FOUR_PROBE_IDS.get(payload[6])
+            if ids is None:
+                continue
+            first, first_alarm, first_low, second, second_alarm, second_low = struct.unpack(">hhhhhh", payload[8:20])
+            probes = {ids[0]: _probe_temperature(first), ids[1]: _probe_temperature(second)}
+            high = {ids[0]: _probe_temperature(first_alarm), ids[1]: _probe_temperature(second_alarm)}
+            low = {ids[0]: _probe_temperature(first_low), ids[1]: _probe_temperature(second_low)}
         else:
             continue
         valid = {probe: temperature for probe, temperature in probes.items() if temperature is not None}
         if valid:
-            return ProbeAdvertisement(model, valid, ambient / 100 if model == "H5191" else None)
+            return ProbeAdvertisement(
+                model, valid, ambient / 100 if model == "H5191" else None,
+                {probe: alarm for probe, alarm in high.items() if alarm is not None} or None,
+                {probe: alarm for probe, alarm in low.items() if alarm is not None} or None,
+            )
     return None
 
 

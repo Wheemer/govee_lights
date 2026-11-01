@@ -1,0 +1,555 @@
+{
+  "domain": "govee_unified",
+  "name": "Govee Unified",
+  "bluetooth": [
+    {
+      "local_name": "ihoment_H600A*"
+    },
+    {
+      "local_name": "Govee_H600A*"
+    },
+    {
+      "local_name": "Minger_H600A*"
+    },
+    {
+      "local_name": "GBK_H600A*"
+    },
+    {
+      "local_name": "GVH_H600A*"
+    },
+    {
+      "local_name": "GVH600A*"
+    },
+    {
+      "local_name": "GV600A*"
+    },
+    {
+      "local_name": "H600A_*"
+    },
+    {
+      "local_name": "ihoment_H6046*"
+    },
+    {
+      "local_name": "Govee_H6046*"
+    },
+    {
+      "local_name": "Minger_H6046*"
+    },
+    {
+      "local_name": "GBK_H6046*"
+    },
+    {
+      "local_name": "GVH_H6046*"
+    },
+    {
+      "local_name": "GVH6046*"
+    },
+    {
+      "local_name": "GV6046*"
+    },
+    {
+      "local_name": "H6046_*"
+    },
+    {
+      "local_name": "ihoment_H601C*"
+    },
+    {
+      "local_name": "Govee_H601C*"
+    },
+    {
+      "local_name": "Minger_H601C*"
+    },
+    {
+      "local_name": "GBK_H601C*"
+    },
+    {
+      "local_name": "GVH_H601C*"
+    },
+    {
+      "local_name": "GVH601C*"
+    },
+    {
+      "local_name": "GV601C*"
+    },
+    {
+      "local_name": "H601C_*"
+    },
+    {
+      "local_name": "ihoment_H617A*"
+    },
+    {
+      "local_name": "Govee_H617A*"
+    },
+    {
+      "local_name": "Minger_H617A*"
+    },
+    {
+      "local_name": "GBK_H617A*"
+    },
+    {
+      "local_name": "GVH_H617A*"
+    },
+    {
+      "local_name": "GVH617A*"
+    },
+    {
+      "local_name": "GV617A*"
+    },
+    {
+      "local_name": "H617A_*"
+    },
+    {
+      "local_name": "ihoment_H617C*"
+    },
+    {
+      "local_name": "Govee_H617C*"
+    },
+    {
+      "local_name": "Minger_H617C*"
+    },
+    {
+      "local_name": "GBK_H617C*"
+    },
+    {
+      "local_name": "GVH_H617C*"
+    },
+    {
+      "local_name": "GVH617C*"
+    },
+    {
+      "local_name": "GV617C*"
+    },
+    {
+      "local_name": "H617C_*"
+    },
+    {
+      "local_name": "ihoment_H617E*"
+    },
+    {
+      "local_name": "Govee_H617E*"
+    },
+    {
+      "local_name": "Minger_H617E*"
+    },
+    {
+      "local_name": "GBK_H617E*"
+    },
+    {
+      "local_name": "GVH_H617E*"
+    },
+    {
+      "local_name": "GVH617E*"
+    },
+    {
+      "local_name": "GV617E*"
+    },
+    {
+      "local_name": "H617E_*"
+    },
+    {
+      "local_name": "ihoment_H617F*"
+    },
+    {
+      "local_name": "Govee_H617F*"
+    },
+    {
+      "local_name": "Minger_H617F*"
+    },
+    {
+      "local_name": "GBK_H617F*"
+    },
+    {
+      "local_name": "GVH_H617F*"
+    },
+    {
+      "local_name": "GVH617F*"
+    },
+    {
+      "local_name": "GV617F*"
+    },
+    {
+      "local_name": "H617F_*"
+    },
+    {
+      "local_name": "ihoment_H6076*"
+    },
+    {
+      "local_name": "ihoment_H6072*"
+    },
+    {
+      "local_name": "Govee_H6072*"
+    },
+    {
+      "local_name": "Minger_H6072*"
+    },
+    {
+      "local_name": "GBK_H6072*"
+    },
+    {
+      "local_name": "GVH_H6072*"
+    },
+    {
+      "local_name": "GVH6072*"
+    },
+    {
+      "local_name": "GV6072*"
+    },
+    {
+      "local_name": "H6072_*"
+    },
+    {
+      "local_name": "Govee_H6076*"
+    },
+    {
+      "local_name": "Minger_H6076*"
+    },
+    {
+      "local_name": "GBK_H6076*"
+    },
+    {
+      "local_name": "GVH_H6076*"
+    },
+    {
+      "local_name": "GVH6076*"
+    },
+    {
+      "local_name": "GV6076*"
+    },
+    {
+      "local_name": "H6076_*"
+    },
+    {
+      "local_name": "ihoment_H6125*"
+    },
+    {
+      "local_name": "Govee_H6125*"
+    },
+    {
+      "local_name": "Minger_H6125*"
+    },
+    {
+      "local_name": "GBK_H6125*"
+    },
+    {
+      "local_name": "GVH_H6125*"
+    },
+    {
+      "local_name": "GVH6125*"
+    },
+    {
+      "local_name": "GV6125*"
+    },
+    {
+      "local_name": "H6125_*"
+    },
+    {
+      "local_name": "ihoment_H6179*"
+    },
+    {
+      "local_name": "Govee_H6179*"
+    },
+    {
+      "local_name": "Minger_H6179*"
+    },
+    {
+      "local_name": "GBK_H6179*"
+    },
+    {
+      "local_name": "GVH_H6179*"
+    },
+    {
+      "local_name": "GVH6179*"
+    },
+    {
+      "local_name": "GV6179*"
+    },
+    {
+      "local_name": "H6179_*"
+    },
+    {
+      "local_name": "ihoment_H6199*"
+    },
+    {
+      "local_name": "Govee_H6199*"
+    },
+    {
+      "local_name": "Minger_H6199*"
+    },
+    {
+      "local_name": "GBK_H6199*"
+    },
+    {
+      "local_name": "GVH_H6199*"
+    },
+    {
+      "local_name": "GVH6199*"
+    },
+    {
+      "local_name": "GV6199*"
+    },
+    {
+      "local_name": "H6199_*"
+    },
+    {
+      "local_name": "ihoment_H7020*"
+    },
+    {
+      "local_name": "Govee_H7020*"
+    },
+    {
+      "local_name": "Minger_H7020*"
+    },
+    {
+      "local_name": "GBK_H7020*"
+    },
+    {
+      "local_name": "GVH_H7020*"
+    },
+    {
+      "local_name": "GVH7020*"
+    },
+    {
+      "local_name": "GV7020*"
+    },
+    {
+      "local_name": "H7020_*"
+    },
+    {
+      "local_name": "ihoment_H6097*"
+    },
+    {
+      "local_name": "Govee_H6097*"
+    },
+    {
+      "local_name": "Minger_H6097*"
+    },
+    {
+      "local_name": "GBK_H6097*"
+    },
+    {
+      "local_name": "GVH_H6097*"
+    },
+    {
+      "local_name": "GVH6097*"
+    },
+    {
+      "local_name": "GV6097*"
+    },
+    {
+      "local_name": "H6097_*"
+    },
+    {
+      "local_name": "ihoment_H6099*"
+    },
+    {
+      "local_name": "Govee_H6099*"
+    },
+    {
+      "local_name": "Minger_H6099*"
+    },
+    {
+      "local_name": "GBK_H6099*"
+    },
+    {
+      "local_name": "GVH_H6099*"
+    },
+    {
+      "local_name": "GVH6099*"
+    },
+    {
+      "local_name": "GV6099*"
+    },
+    {
+      "local_name": "H6099_*"
+    },
+    {
+      "local_name": "ihoment_H60A1*"
+    },
+    {
+      "local_name": "Govee_H60A1*"
+    },
+    {
+      "local_name": "Minger_H60A1*"
+    },
+    {
+      "local_name": "GBK_H60A1*"
+    },
+    {
+      "local_name": "GVH_H60A1*"
+    },
+    {
+      "local_name": "GVH60A1*"
+    },
+    {
+      "local_name": "GV60A1*"
+    },
+    {
+      "local_name": "H60A1_*"
+    },
+    {
+      "local_name": "ihoment_H60A6*"
+    },
+    {
+      "local_name": "Govee_H60A6*"
+    },
+    {
+      "local_name": "Minger_H60A6*"
+    },
+    {
+      "local_name": "GBK_H60A6*"
+    },
+    {
+      "local_name": "GVH_H60A6*"
+    },
+    {
+      "local_name": "GVH60A6*"
+    },
+    {
+      "local_name": "GV60A6*"
+    },
+    {
+      "local_name": "H60A6_*"
+    },
+    {
+      "local_name": "ihoment_H6102*"
+    },
+    {
+      "local_name": "Govee_H6102*"
+    },
+    {
+      "local_name": "Minger_H6102*"
+    },
+    {
+      "local_name": "GBK_H6102*"
+    },
+    {
+      "local_name": "GVH_H6102*"
+    },
+    {
+      "local_name": "GVH6102*"
+    },
+    {
+      "local_name": "GV6102*"
+    },
+    {
+      "local_name": "H6102_*"
+    },
+    {
+      "local_name": "ihoment_H7025*"
+    },
+    {
+      "local_name": "Govee_H7025*"
+    },
+    {
+      "local_name": "Minger_H7025*"
+    },
+    {
+      "local_name": "GBK_H7025*"
+    },
+    {
+      "local_name": "GVH_H7025*"
+    },
+    {
+      "local_name": "GVH7025*"
+    },
+    {
+      "local_name": "GV7025*"
+    },
+    {
+      "local_name": "H7025_*"
+    },
+    {
+      "local_name": "ihoment_H66A0*"
+    },
+    {
+      "local_name": "Govee_H66A0*"
+    },
+    {
+      "local_name": "Minger_H66A0*"
+    },
+    {
+      "local_name": "GBK_H66A0*"
+    },
+    {
+      "local_name": "GVH_H66A0*"
+    },
+    {
+      "local_name": "GVH66A0*"
+    },
+    {
+      "local_name": "GV66A0*"
+    },
+    {
+      "local_name": "H66A0_*"
+    },
+    {
+      "local_name": "ihoment_H1A42*"
+    },
+    {
+      "local_name": "Govee_H1A42*"
+    },
+    {
+      "local_name": "Minger_H1A42*"
+    },
+    {
+      "local_name": "GBK_H1A42*"
+    },
+    {
+      "local_name": "GVH_H1A42*"
+    },
+    {
+      "local_name": "GVH1A42*"
+    },
+    {
+      "local_name": "GV1A42*"
+    },
+    {
+      "local_name": "H1A42_*"
+    },
+    {
+      "local_name": "ihoment_H61F5*"
+    },
+    {
+      "local_name": "Govee_H61F5*"
+    },
+    {
+      "local_name": "Minger_H61F5*"
+    },
+    {
+      "local_name": "GBK_H61F5*"
+    },
+    {
+      "local_name": "GVH_H61F5*"
+    },
+    {
+      "local_name": "GVH61F5*"
+    },
+    {
+      "local_name": "GV61F5*"
+    },
+    {
+      "local_name": "H61F5_*"
+    }
+  ],
+  "codeowners": [
+    "@Wheemer"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "bluetooth_adapters",
+    "http",
+    "websocket_api"
+  ],
+  "documentation": "https://github.com/Wheemer/govee_lights",
+  "integration_type": "device",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/Wheemer/govee_lights/issues",
+  "loggers": [
+    "bleak",
+    "bleak_retry_connector"
+  ],
+  "requirements": [
+    "kaitaistruct==0.11"
+  ],
+  "version": "7.30.1"
+}

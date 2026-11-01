@@ -1,0 +1,238 @@
+"""Decode generated outbound effect trees into canonical effect content."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from .const import get_profile
+from .effect_domain import (
+    H617A_SEGMENT_COUNT,
+    EffectContent,
+    EffectPair,
+    H6179MixedDiyEffect,
+    H6179SingleDiyEffect,
+    MultiEffect,
+    PaintedEffect,
+    PaletteDiyEffect,
+    SingleEffect,
+)
+from .generated_protocol_adapter import parse_a3_effect_envelope
+from .h60a6_effects import decode_native_body
+from .h6179_effect_codec import decode_h6179_effect
+from .layered_scene_decoder import decode_workshop_effect
+from .protocol_core import (
+    DiyType03,
+    DiyType04,
+    H60a6DiyBody,
+    H60a6EffectFrame,
+    H6046EffectUpload,
+    H6199EffectUpload,
+    SceneBody,
+    SceneType1Body,
+    serialize_native_body,
+)
+from .transport import reassemble_a1_02, reassemble_a3
+
+__all__ = [
+    "UnsupportedA3EffectError",
+    "decode_a3_effect",
+    "decode_a3_effect_frames",
+    "decode_effect_frames",
+]
+
+
+class UnsupportedA3EffectError(ValueError):
+    """An A3 tree cannot be represented by a supported canonical effect type."""
+
+
+def decode_a3_effect_frames(
+    frames: tuple[bytes, ...],
+    model: str,
+) -> EffectContent:
+    """Reassemble and decode locally generated A3 frames through Kaitai."""
+    envelope = reassemble_a3(frames)
+    return decode_a3_effect(parse_a3_effect_envelope(envelope, model), model)
+
+
+def decode_effect_frames(
+    frames: tuple[bytes, ...],
+    model: str,
+    transport: str,
+) -> EffectContent:
+    """Decode locally generated upload frames using their explicit transport."""
+    if transport == "a3":
+        return decode_a3_effect_frames(frames, model)
+    if transport == "a1_02":
+        if get_profile(model).effect_grammar != "H6179":
+            raise ValueError(f"{model} cannot decode A1 02 effect frames")
+        return decode_h6179_effect(reassemble_a1_02(frames))
+    if transport == "a4":
+        from .transport import reassemble_a4
+
+        subtype, body = reassemble_a4(frames)
+        if get_profile(model).effect_grammar != "H60A6" or subtype != int(H60a6EffectFrame.Subtype.native_effect):
+            raise ValueError("unsupported native paint transport or subtype")
+        return decode_native_body(body, family=798)
+    raise ValueError(f"unsupported effect upload transport {transport!r}")
+
+
+def decode_a3_effect(tree: Any, model: str) -> EffectContent:
+    """Decode a parsed generated A3 tree without assigning unevidenced semantics."""
+    grammar = get_profile(model).effect_grammar
+    if grammar == "H6179":
+        if not isinstance(tree, DiyType04):
+            raise TypeError("tree is not a generated H6179 type-04 DIY root")
+        content = _decode_h617a_type04(tree)
+        if isinstance(content, SingleEffect):
+            return H6179SingleDiyEffect(model, content.family, content.variant, content.speed, content.palette)
+        return H6179MixedDiyEffect(model, content.effects, content.speed, content.palette)
+    if grammar == "H6046":
+        if tree.kind == H6046EffectUpload.BodyKind.scene:
+            return _decode_layered_tree(tree, model)
+        if tree.kind == H6046EffectUpload.BodyKind.diy:
+            body = tree.content
+            if any(body.unknown_tail):
+                raise UnsupportedA3EffectError("H6046 DIY has unrepresented trailing data")
+            palette = tuple(_rgb(colour) for colour in body.palette)
+            if body.family == H6046EffectUpload.EffectFamily.mixed:
+                return MultiEffect(
+                    effects=tuple(EffectPair(int(pair.family), pair.variant) for pair in body.pairs),
+                    speed=body.speed,
+                    palette=palette,
+                )
+            return SingleEffect(family=int(body.family), variant=body.variant, speed=body.speed, palette=palette)
+        raise UnsupportedA3EffectError("H6046 built-in parameters require catalogue identity")
+    if grammar == "H60A6":
+        if isinstance(tree, H60a6DiyBody):
+            return decode_native_body(serialize_native_body(tree), family=797)
+        if isinstance(getattr(tree, "body", None), H60a6DiyBody):
+            return decode_native_body(serialize_native_body(tree.body), family=797)
+        payload = getattr(tree, "payload", None)
+        if isinstance(payload, bytes):
+            return decode_native_body(payload, family=797)
+        raise TypeError("tree is not a generated native DIY body")
+    if grammar == "H6099":
+        if int(tree.kind) == 4:
+            return _decode_h617a_type04(tree.diy)
+        # The upload omits total IC count; retain the already validated source
+        # rather than infer topology from the highest painted index.
+        raise UnsupportedA3EffectError("H6099 upload requires source topology or catalogue identity")
+    if grammar == "H617A":
+        if isinstance(tree, DiyType03):
+            from .effect_catalogue import MODEL_EFFECT_CATALOGUES
+
+            catalogue = MODEL_EFFECT_CATALOGUES.get(model)
+            if catalogue is not None and catalogue.painted_addressing == "physical_ic":
+                raise UnsupportedA3EffectError("Painted upload omits total physical IC count; retain source topology")
+            return _decode_h617a_painted(tree)
+        if isinstance(tree, DiyType04):
+            return _decode_h617a_type04(tree)
+        if isinstance(tree, SceneBody):
+            return _decode_layered_tree(tree, model)
+        if isinstance(tree, SceneType1Body):
+            raise UnsupportedA3EffectError(
+                "H617A type-1 scene bodies require catalogue identity and are not decoded from upload packets alone"
+            )
+        raise TypeError("tree is not a generated H617A A3 effect root")
+
+    if grammar == "H6199":
+        if not isinstance(tree, H6199EffectUpload):
+            raise TypeError("tree is not a generated H6199 A3 effect root")
+        if tree.kind == H6199EffectUpload.BodyKind.diy:
+            return _decode_h6199_palette_diy(tree, model)
+        if tree.kind == H6199EffectUpload.BodyKind.scene:
+            return _decode_layered_tree(tree, model)
+        if tree.kind == H6199EffectUpload.BodyKind.builtin_parameters:
+            raise UnsupportedA3EffectError(
+                "H6199 built-in parameter bodies require catalogue identity and are not "
+                "decoded from upload packets alone"
+            )
+        raise UnsupportedA3EffectError(f"H6199 A3 body kind {int(tree.kind)} is not supported")
+
+    raise ValueError(f"{model} has no canonical A3 effect decoder")
+
+
+def _decode_h617a_painted(tree: Any) -> PaintedEffect:
+    effect = getattr(tree.effect, "name", None)
+    if not isinstance(effect, str):
+        raise UnsupportedA3EffectError(f"H617A painted effect {int(tree.effect)} has no canonical name")
+    if tree.num_groups != len(tree.groups):
+        raise UnsupportedA3EffectError("H617A painted group count does not match its generated tree")
+    _require_zero_padding(tree.padding, "H617A painted")
+
+    segments: list[tuple[int, int, int] | None] = [None] * H617A_SEGMENT_COUNT
+    for group in tree.groups:
+        if group.num_segment_indices != len(group.segment_indices) or not group.segment_indices:
+            raise UnsupportedA3EffectError("H617A painted groups must contain their declared segments")
+        fill = _rgb(group.fill)
+        for index in group.segment_indices:
+            if not 0 <= index < H617A_SEGMENT_COUNT:
+                raise UnsupportedA3EffectError(f"H617A painted segment {index} is out of range")
+            if segments[index] is not None:
+                raise UnsupportedA3EffectError(f"H617A painted segment {index} appears more than once")
+            segments[index] = fill
+
+    return PaintedEffect(
+        effect=effect,
+        speed=tree.speed,
+        brightness=tree.brightness,
+        segments=tuple(segments),
+        background=_rgb(tree.background),
+    )
+
+
+def _decode_h617a_type04(tree: Any) -> SingleEffect | MultiEffect:
+    body = tree.body
+    _require_zero_padding(body.padding, "H617A type-04")
+    palette = tuple(_rgb(colour) for colour in body.palette.colours)
+    if body.len_palette != len(palette) * 3:
+        raise UnsupportedA3EffectError("H617A type-04 palette length does not match its generated tree")
+
+    if tree.family != 0xFF:
+        return SingleEffect(
+            family=tree.family,
+            variant=body.variant,
+            speed=body.speed,
+            palette=palette,
+        )
+
+    if body.variant != 0:
+        raise UnsupportedA3EffectError(f"H617A Multi reserved variant must be 0, received {body.variant}")
+    if body.seqlen != len(body.pairs) * 2:
+        raise UnsupportedA3EffectError("H617A Multi sequence length does not match its generated tree")
+    effects = tuple(EffectPair(pair.family, pair.variant) for pair in body.pairs)
+    return MultiEffect(effects=effects, speed=body.speed, palette=palette)
+
+
+def _decode_h6199_palette_diy(tree: Any, model: str) -> PaletteDiyEffect:
+    if tree.chunk_count != tree.diy_chunk_count:
+        raise UnsupportedA3EffectError(
+            f"H6199 palette DIY requires {tree.diy_chunk_count} chunks, received {tree.chunk_count}"
+        )
+    content = tree.content
+    family = int(content.family)
+    if content.palette_len != len(content.palette) * 3:
+        raise UnsupportedA3EffectError("H6199 palette DIY length does not match its generated tree")
+    _require_zero_padding(content.padding, "H6199 palette DIY")
+    return PaletteDiyEffect(
+        model=model,
+        family=family,
+        variant=content.variant,
+        speed=content.speed,
+        palette=tuple(_rgb(colour) for colour in content.palette),
+    )
+
+
+def _decode_layered_tree(tree: Any, model: str) -> EffectContent:
+    envelope = bytes(tree._io.to_byte_array())
+    effect, _trailing_padding = decode_workshop_effect(model, envelope[3:])
+    return effect
+
+
+def _require_zero_padding(padding: list[int], context: str) -> None:
+    if any(padding):
+        raise UnsupportedA3EffectError(f"{context} contains non-zero reserved padding")
+
+
+def _rgb(colour: Any) -> tuple[int, int, int]:
+    return int(colour.red), int(colour.green), int(colour.blue)

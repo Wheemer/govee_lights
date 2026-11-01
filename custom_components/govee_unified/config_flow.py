@@ -1,0 +1,344 @@
+"""Config flow for HA Govee LED BLE."""
+
+from __future__ import annotations
+
+import logging
+import re
+from typing import Any
+
+from bleak import BleakError  # type: ignore[attr-defined]
+from homeassistant.components import bluetooth
+from homeassistant.components.bluetooth import BluetoothServiceInfo
+from homeassistant.config_entries import (
+    SOURCE_RECONFIGURE,
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlowWithReload,
+)
+from homeassistant.const import CONF_ADDRESS
+from homeassistant.core import callback
+
+from .ble_connection import async_validate_ble_connection
+from .const import (
+    CONF_ALWAYS_INCLUDE_CUSTOM_EFFECTS,
+    CONF_CONNECTION_MODE,
+    CONF_EFFECT_CATEGORIES,
+    CONF_EFFECT_FAMILIES,
+    CONF_H6102_APP_FIRMWARE,
+    CONF_H6102_APP_HARDWARE,
+    CONF_H6102_PACT,
+    CONF_MODEL,
+    CONF_PREFIX_EFFECT_NAMES,
+    CONF_REGISTER_EFFECT_STUDIO,
+    CONF_SHOW_EXPERIMENTAL_FEEDBACK,
+    CONNECTION_MODE_HOLD,
+    CONNECTION_MODE_RELEASE,
+    DOMAIN,
+    MODEL_PROFILES,
+    SupportQuality,
+    default_effect_categories,
+    model_from_ble_name,
+    resolve_model,
+    supported_effect_categories,
+)
+from .effect_setup import get_effect_backend
+from .firmware_version import FirmwareVersion
+from .h6102_protocol import H6102_PACTS
+from .schema_compat import vol
+
+_LOGGER = logging.getLogger(__name__)
+
+_MANUAL_ADDRESS_PATTERN = re.compile(r"^[0-9A-F]{12}$")
+
+
+def _normalize_manual_address(address: str) -> str:
+    compact = address.strip().upper().replace(":", "").replace("-", "")
+    if not _MANUAL_ADDRESS_PATTERN.fullmatch(compact):
+        raise ValueError("invalid BLE address")
+    return ":".join(compact[index : index + 2] for index in range(0, 12, 2))
+
+
+class GoveeConfigFlow(ConfigFlow, domain=DOMAIN):
+    VERSION = 8
+
+    _discovered: dict[str, str]
+    _pending_device: dict[str, str]
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(_config_entry: ConfigEntry) -> GoveeOptionsFlow:
+        return GoveeOptionsFlow()
+
+    async def async_step_bluetooth(self, discovery_info: BluetoothServiceInfo) -> ConfigFlowResult:
+        model = model_from_ble_name(discovery_info.name)
+        if model is None:
+            return self.async_abort(reason="not_supported")
+        await self.async_set_unique_id(discovery_info.address.strip().upper())
+        self._abort_if_unique_id_configured()
+        self._discovered = {CONF_MODEL: model}
+        # Model only, never the BLE name/MAC (no PII).
+        self.context["title_placeholders"] = {"name": model}
+        return await self.async_step_bluetooth_confirm()
+
+    async def async_step_bluetooth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        model = self._discovered[CONF_MODEL]
+        if user_input is None:
+            self._set_confirm_only()
+            return self.async_show_form(step_id="bluetooth_confirm", description_placeholders={"model": model})
+        return await self._async_finish_new_device(self._discovered)
+
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if user_input is not None:
+            try:
+                address = _normalize_manual_address(user_input[CONF_ADDRESS])
+            except ValueError:
+                return self._show_user_form(errors={CONF_ADDRESS: "invalid_address"})
+            await self.async_set_unique_id(address, raise_on_progress=False)
+            self._abort_if_unique_id_configured()
+            selected_model = user_input[CONF_MODEL]
+            service_info = bluetooth.async_last_service_info(self.hass, address, connectable=True)
+            advertised_model = model_from_ble_name(service_info.name) if service_info is not None else None
+            if advertised_model is not None and advertised_model != selected_model:
+                return self._show_user_form(errors={"base": "model_mismatch"})
+            try:
+                await async_validate_ble_connection(self.hass, address)
+            except BleakError:
+                return self._show_user_form(errors={"base": "cannot_connect"})
+            except Exception:  # noqa: BLE001 - config flows must surface unexpected validation failures.
+                _LOGGER.exception("Unexpected error validating a Govee BLE device")
+                return self._show_user_form(errors={"base": "unknown"})
+            self._abort_if_unique_id_configured()
+            if selected_model == "H6102":
+                return await self.async_step_h6102_firmware()
+            return await self._async_finish_new_device({CONF_MODEL: selected_model})
+        return self._show_user_form()
+
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        entry = self._get_reconfigure_entry()
+        if user_input is not None:
+            selected_model = user_input[CONF_MODEL]
+            assert entry.unique_id is not None
+            service_info = bluetooth.async_last_service_info(self.hass, entry.unique_id, connectable=True)
+            advertised_model = model_from_ble_name(service_info.name) if service_info is not None else None
+            if advertised_model is not None and advertised_model != selected_model:
+                return self._show_reconfigure_form(entry, errors={"base": "model_mismatch"})
+            if selected_model == "H6102":
+                return await self.async_step_h6102_firmware()
+            return await self._finish_reconfigure(entry, selected_model)
+        return self._show_reconfigure_form(entry)
+
+    async def async_step_h6102_firmware(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if user_input is None:
+            return self._show_h6102_firmware_form()
+        firmware = user_input.get(CONF_H6102_APP_FIRMWARE)
+        # Earlier candidates accepted short forms (3.2.2). Keep stored context
+        # visible on reconfigure, but require device-format 3.02.02 before reuse.
+        if firmware and FirmwareVersion.parse(firmware) is None:
+            return self._show_h6102_firmware_form(errors={CONF_H6102_APP_FIRMWARE: "invalid_firmware"})
+        hardware = user_input.get(CONF_H6102_APP_HARDWARE)
+        if hardware and FirmwareVersion.parse(hardware) is None:
+            return self._show_h6102_firmware_form(errors={CONF_H6102_APP_HARDWARE: "invalid_hardware"})
+        pact = user_input.get(CONF_H6102_PACT) or None
+        if pact is not None and pact not in H6102_PACTS:
+            return self._show_h6102_firmware_form(errors={CONF_H6102_PACT: "invalid_pact"})
+        if self.source == SOURCE_RECONFIGURE:
+            return await self._finish_reconfigure(
+                self._get_reconfigure_entry(), "H6102", firmware or None, pact, hardware or None
+            )
+        self._abort_if_unique_id_configured()
+        data = {CONF_MODEL: "H6102"}
+        if firmware:
+            data[CONF_H6102_APP_FIRMWARE] = firmware
+        if hardware:
+            data[CONF_H6102_APP_HARDWARE] = hardware
+        if pact:
+            data[CONF_H6102_PACT] = pact
+        return await self._async_finish_new_device(data)
+
+    async def _async_finish_new_device(self, data: dict[str, str]) -> ConfigFlowResult:
+        model = data[CONF_MODEL]
+        self._pending_device = data
+        if MODEL_PROFILES[model].support_quality is SupportQuality.EXPERIMENTAL:
+            self.context["title_placeholders"] = {"name": model}
+            return await self.async_step_experimental()
+        return await self.async_step_effect_studio()
+
+    async def async_step_experimental(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        model = self._pending_device[CONF_MODEL]
+        if user_input is not None:
+            self._abort_if_unique_id_configured()
+            return await self.async_step_effect_studio()
+        issue = MODEL_PROFILES[model].confirmation_issue
+        assert issue is not None
+        self._set_confirm_only()
+        return self.async_show_form(
+            step_id="experimental",
+            description_placeholders={
+                "feedback_url": f"https://github.com/teh-hippo/ha-govee-led-ble/issues/{issue}",
+            },
+        )
+
+    async def async_step_effect_studio(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        model = self._pending_device[CONF_MODEL]
+        options = {}
+        if supported_effect_categories(model):
+            if user_input is None:
+                self.context.pop("confirm_only", None)
+                return self.async_show_form(
+                    step_id="effect_studio",
+                    data_schema=vol.Schema({vol.Required(CONF_REGISTER_EFFECT_STUDIO, default=True): bool}),
+                )
+            options[CONF_REGISTER_EFFECT_STUDIO] = user_input[CONF_REGISTER_EFFECT_STUDIO]
+        self._abort_if_unique_id_configured()
+        return self.async_create_entry(title=f"Govee {model}", data=self._pending_device, options=options)
+
+    async def _finish_reconfigure(
+        self,
+        entry: ConfigEntry,
+        selected_model: str,
+        firmware: str | None = None,
+        pact: str | None = None,
+        hardware: str | None = None,
+    ) -> ConfigFlowResult:
+        previous_model = entry.data.get(CONF_MODEL)
+        data = dict(entry.data)
+        data[CONF_MODEL] = selected_model
+        data.pop(CONF_H6102_APP_FIRMWARE, None)
+        data.pop(CONF_H6102_APP_HARDWARE, None)
+        data.pop(CONF_H6102_PACT, None)
+        if firmware is not None:
+            data[CONF_H6102_APP_FIRMWARE] = firmware
+        if hardware is not None:
+            data[CONF_H6102_APP_HARDWARE] = hardware
+        if pact is not None:
+            data[CONF_H6102_PACT] = pact
+        excluded = {
+            CONF_EFFECT_CATEGORIES,
+            CONF_EFFECT_FAMILIES,
+            CONF_PREFIX_EFFECT_NAMES,
+            CONF_ALWAYS_INCLUDE_CUSTOM_EFFECTS,
+        }
+        if not MODEL_PROFILES[selected_model].state_readable:
+            excluded.add(CONF_CONNECTION_MODE)
+        options = {key: value for key, value in entry.options.items() if key not in excluded}
+        if selected_model != previous_model and (effect_backend := get_effect_backend(self.hass)) is not None:
+            await effect_backend.scene_defaults.async_delete_device(entry.entry_id)
+            await effect_backend.template_defaults.async_delete_device(entry.entry_id)
+            await effect_backend.active_workspaces.async_delete_device(entry.entry_id)
+            await effect_backend.device_cache.async_delete_device(entry.entry_id)
+        return self.async_update_reload_and_abort(
+            entry,
+            title=f"Govee {selected_model}",
+            data=data,
+            options=options,
+        )
+
+    def _show_user_form(self, *, errors: dict[str, str] | None = None) -> ConfigFlowResult:
+        models = list(MODEL_PROFILES.keys())
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_ADDRESS): str,
+                    vol.Required(CONF_MODEL): vol.In(models),
+                }
+            ),
+            errors=errors,
+        )
+
+    def _show_reconfigure_form(
+        self,
+        entry: ConfigEntry,
+        *,
+        errors: dict[str, str] | None = None,
+    ) -> ConfigFlowResult:
+        current = entry.data.get(CONF_MODEL)
+        default = current if isinstance(current, str) and current in MODEL_PROFILES else next(iter(MODEL_PROFILES))
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema({vol.Required(CONF_MODEL, default=default): vol.In(list(MODEL_PROFILES))}),
+            errors=errors,
+        )
+
+    def _show_h6102_firmware_form(self, *, errors: dict[str, str] | None = None) -> ConfigFlowResult:
+        stored = self._get_reconfigure_entry().data if self.source == SOURCE_RECONFIGURE else {}
+
+        def version_field(key: str) -> vol.Optional:
+            value = stored.get(key)
+            if isinstance(value, str):
+                return vol.Optional(key, description={"suggested_value": value})
+            return vol.Optional(key)
+
+        return self.async_show_form(
+            step_id="h6102_firmware",
+            data_schema=vol.Schema(
+                {
+                    version_field(CONF_H6102_APP_FIRMWARE): str,
+                    version_field(CONF_H6102_APP_HARDWARE): str,
+                    vol.Optional(CONF_H6102_PACT, default=stored.get(CONF_H6102_PACT, "")): vol.In(
+                        {
+                            "": "Automatic / unknown",
+                            "10/1": "RGBIC Pact 10/1",
+                            "10/2": "RGBIC Pact 10/2",
+                            "1/1": "Legacy Pact 1/1",
+                            "1/2": "Legacy Pact 1/2",
+                        }
+                    ),
+                }
+            ),
+            errors=errors,
+        )
+
+
+class GoveeOptionsFlow(OptionsFlowWithReload):
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        raw_model = self.config_entry.data.get(CONF_MODEL)
+        model = resolve_model(raw_model) if isinstance(raw_model, str) else None
+        if model is None:
+            return self.async_abort(reason="not_supported")
+        supported = supported_effect_categories(model)
+        readable = MODEL_PROFILES[model].state_readable
+        feedback = MODEL_PROFILES[model].confirmation_issue is not None
+        if not supported and not readable:
+            return self.async_abort(reason="no_options")
+        if user_input is not None:
+            options = {key: value for key, value in self.config_entry.options.items() if key != CONF_EFFECT_FAMILIES}
+            if supported:
+                options[CONF_REGISTER_EFFECT_STUDIO] = user_input[CONF_REGISTER_EFFECT_STUDIO]
+                options[CONF_EFFECT_CATEGORIES] = [category for category in supported if user_input[category]]
+                options[CONF_PREFIX_EFFECT_NAMES] = user_input[CONF_PREFIX_EFFECT_NAMES]
+                options[CONF_ALWAYS_INCLUDE_CUSTOM_EFFECTS] = user_input[CONF_ALWAYS_INCLUDE_CUSTOM_EFFECTS]
+            if readable:
+                options[CONF_CONNECTION_MODE] = user_input[CONF_CONNECTION_MODE]
+            if feedback:
+                options[CONF_SHOW_EXPERIMENTAL_FEEDBACK] = user_input[CONF_SHOW_EXPERIMENTAL_FEEDBACK]
+            return self.async_create_entry(data=options)
+        defaults = default_effect_categories(model)
+        current = self.config_entry.options.get(CONF_EFFECT_CATEGORIES, list(defaults))
+        prefix_effect_names = self.config_entry.options.get(CONF_PREFIX_EFFECT_NAMES, False)
+        always_include_custom_effects = self.config_entry.options.get(CONF_ALWAYS_INCLUDE_CUSTOM_EFFECTS, False)
+        connection_mode = self.config_entry.options.get(CONF_CONNECTION_MODE, CONNECTION_MODE_RELEASE)
+        schema: dict[Any, Any] = {}
+        if readable:
+            schema[vol.Required(CONF_CONNECTION_MODE, default=connection_mode)] = vol.In(
+                {CONNECTION_MODE_RELEASE: "Release", CONNECTION_MODE_HOLD: "Hold"}
+            )
+        if supported:
+            schema[
+                vol.Required(
+                    CONF_REGISTER_EFFECT_STUDIO,
+                    default=self.config_entry.options.get(CONF_REGISTER_EFFECT_STUDIO, True),
+                )
+            ] = bool
+            schema.update({vol.Required(category, default=category in current): bool for category in supported})
+            schema[vol.Required(CONF_PREFIX_EFFECT_NAMES, default=prefix_effect_names)] = bool
+            schema[vol.Required(CONF_ALWAYS_INCLUDE_CUSTOM_EFFECTS, default=always_include_custom_effects)] = bool
+        if feedback:
+            schema[
+                vol.Required(
+                    CONF_SHOW_EXPERIMENTAL_FEEDBACK,
+                    default=self.config_entry.options.get(CONF_SHOW_EXPERIMENTAL_FEEDBACK, True),
+                )
+            ] = bool
+        return self.async_show_form(step_id="init", data_schema=vol.Schema(schema))

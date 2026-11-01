@@ -1,0 +1,389 @@
+"""HA Govee LED BLE integration."""
+
+import asyncio
+import logging
+from typing import Any
+
+from homeassistant.components import bluetooth, frontend
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.typing import ConfigType
+from homeassistant.util import dt as dt_util
+
+from .ble_connection import clear_stale_gatt_recovery
+from .const import (
+    CONF_ALWAYS_INCLUDE_CUSTOM_EFFECTS,
+    CONF_CONNECTION_MODE,
+    CONF_EFFECT_CATEGORIES,
+    CONF_EFFECT_FAMILIES,
+    CONF_H6102_APP_FIRMWARE,
+    CONF_H6102_APP_HARDWARE,
+    CONF_H6102_PACT,
+    CONF_MODEL,
+    CONF_PREFIX_EFFECT_NAMES,
+    CONF_REGISTER_EFFECT_STUDIO,
+    CONNECTION_MODE_RELEASE,
+    DOMAIN,
+    MODEL_PROFILES,
+    always_include_custom_effects_from_options,
+    default_effect_categories,
+    effect_categories_from_options,
+    effect_families_from_options,
+    model_from_ble_name,
+    prefix_effect_names_from_options,
+    resolve_model,
+    supported_effect_categories,
+)
+from .coordinator import GoveeBLECoordinator, clear_availability_log_state
+from .coordinator_dreamview import (
+    async_cleanup_dreamview_claims_on_entry_removed,
+    async_guard_dreamview_entry,
+    async_recover_dreamview_claims,
+)
+from .editor import EDITOR_PANEL_PATH, async_register_editor_panel, editor_url
+from .effect_setup import async_setup_effects, get_effect_backend
+from .light_services import async_register_light_services
+
+type GoveeBLEConfigEntry = ConfigEntry[GoveeBLECoordinator]
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+PLATFORMS = [Platform.LIGHT, Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH]
+_LEGACY_ENTITY_SUFFIXES = {
+    "_active_mode",
+    "_blank_screen",
+    "_effect_preview",
+    "_music_daynight_segments",
+    "_music_daynight_speed",
+    "_music_fountain_direction",
+    "_music_hopping_brightness",
+    "_music_piano_key_count",
+    "_music_sensitivity",
+    "_music_separation_gradient",
+    "_music_separation_point",
+    "_music_style",
+    "_poweroff_memory",
+    "_reduce_motion",
+    "_relative_brightness",
+    "_relative_brightness_bottom",
+    "_relative_brightness_left",
+    "_relative_brightness_right",
+    "_relative_brightness_top",
+    "_scene_speed",
+    "_sleep_timer",
+    "_sleep_timer_duration",
+    "_video_brightness",
+    "_video_capture_region",
+    "_video_saturation",
+    "_video_sound_effects",
+    "_video_sound_effects_softness",
+    "_wakeup_timer",
+    "_wakeup_timer_time",
+    "_white_brightness",
+    "_white_balance_blue",
+    "_white_balance",
+    "_white_balance_preset",
+    "_white_balance_red",
+    "_music_calm",
+    "_music_mode",
+}
+# Config entry versions below 2 can contain this unsupported option.
+_LEGACY_EXPERIMENTAL_OPTION = "experimental"
+_LOGGER = logging.getLogger(__name__)
+
+
+def _unsupported_model_issue_id(entry: GoveeBLEConfigEntry) -> str:
+    return f"unsupported_model_{entry.entry_id}"
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    async_register_light_services(hass)
+    await async_setup_effects(hass)
+    await _async_update_editor_panel(hass)
+    hass.async_create_task(async_recover_dreamview_claims(hass))
+    return True
+
+
+def _effect_studio_sidebar_visible(
+    hass: HomeAssistant,
+    *,
+    excluding_entry_id: str | None = None,
+) -> bool:
+    return any(
+        entry.entry_id != excluding_entry_id
+        and entry.disabled_by is None
+        and entry.options.get(CONF_REGISTER_EFFECT_STUDIO, True)
+        and isinstance(model := entry.data.get(CONF_MODEL), str)
+        and bool(supported_effect_categories(model))
+        for entry in hass.config_entries.async_entries(DOMAIN)
+    )
+
+
+async def _async_update_editor_panel(
+    hass: HomeAssistant,
+    *,
+    excluding_entry_id: str | None = None,
+) -> None:
+    if hass.is_stopping:
+        return
+    if not _effect_studio_sidebar_visible(hass, excluding_entry_id=excluding_entry_id):
+        frontend.async_remove_panel(hass, EDITOR_PANEL_PATH, warn_if_unknown=False)
+        return
+    await async_register_editor_panel(
+        hass,
+        advanced_available=get_effect_backend(hass) is not None,
+    )
+
+
+async def _async_cleanup_legacy_entities(hass: HomeAssistant, entry: GoveeBLEConfigEntry) -> None:
+    raw_model = entry.data.get(CONF_MODEL)
+    model = resolve_model(raw_model) if isinstance(raw_model, str) else None
+    profile = MODEL_PROFILES.get(model) if model is not None else None
+    unsupported = set(_LEGACY_ENTITY_SUFFIXES)
+    if profile is not None:
+        for control in {"gradual", "limit", "power_off_memory"} - profile.boolean_controls:
+            unsupported.add(f"_{control}")
+        if not profile.configured_string_counts:
+            unsupported.add("_configured_strings")
+        if model != "H6199":
+            unsupported.update({"_strip_direction", "_camera_position", "_gradient", "_camera_status"})
+    registry = er.async_get(hass)
+    for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if entity.unique_id and any(entity.unique_id.endswith(suffix) for suffix in unsupported):
+            registry.async_remove(entity.entity_id)
+
+
+async def _async_migrate_entry_model(
+    hass: HomeAssistant,
+    entry: GoveeBLEConfigEntry,
+    *,
+    old_model: str,
+    new_model: str,
+) -> None:
+    data = dict(entry.data)
+    data[CONF_MODEL] = new_model
+    if new_model != "H6102":
+        data.pop(CONF_H6102_APP_FIRMWARE, None)
+        data.pop(CONF_H6102_APP_HARDWARE, None)
+        data.pop(CONF_H6102_PACT, None)
+    options = dict(entry.options)
+    options.pop(CONF_EFFECT_FAMILIES, None)
+    if CONF_EFFECT_CATEGORIES in options:
+        supported = supported_effect_categories(new_model)
+        if supported:
+            selected = options.get(CONF_EFFECT_CATEGORIES)
+            filtered = (
+                [category for category in supported if category in selected]
+                if isinstance(selected, list | tuple | set | frozenset)
+                else []
+            )
+            options[CONF_EFFECT_CATEGORIES] = filtered or list(default_effect_categories(new_model))
+        else:
+            options.pop(CONF_EFFECT_CATEGORIES, None)
+    if not MODEL_PROFILES[new_model].state_readable:
+        options.pop(CONF_CONNECTION_MODE, None)
+    title = (
+        f"Govee {new_model}" if not isinstance(entry.title, str) or entry.title == f"Govee {old_model}" else entry.title
+    )
+    hass.config_entries.async_update_entry(entry, title=title, data=data, options=options)
+    assert entry.unique_id is not None
+    registry = dr.async_get(hass)
+    device = registry.async_get_device_by_identifier((DOMAIN, entry.unique_id), entry.entry_id)
+    if device is not None:
+        updates: dict[str, Any] = {"model": new_model}
+        if device.name in (None, f"Govee {old_model}"):
+            updates["name"] = f"Govee {new_model}"
+        registry.async_update_device(device.id, **updates)
+    if effect_backend := get_effect_backend(hass):
+        await asyncio.gather(
+            effect_backend.scene_defaults.async_delete_device(entry.entry_id),
+            effect_backend.template_defaults.async_delete_device(entry.entry_id),
+            effect_backend.active_workspaces.async_delete_device(entry.entry_id),
+            effect_backend.device_cache.async_delete_device(entry.entry_id),
+        )
+
+
+def _addr(entry: GoveeBLEConfigEntry) -> str:
+    assert entry.unique_id is not None
+    return entry.unique_id.replace(":", "").lower()
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: GoveeBLEConfigEntry) -> bool:
+    options = dict(entry.options)
+    if entry.version < 2:
+        options = {k: v for k, v in options.items() if k != _LEGACY_EXPERIMENTAL_OPTION}
+    data = dict(entry.data)
+    raw_model = data.get(CONF_MODEL)
+    model = resolve_model(raw_model) if isinstance(raw_model, str) else None
+    if model is None and isinstance(entry.title, str):
+        model = next((candidate for candidate in MODEL_PROFILES if candidate in entry.title.upper()), None)
+    if model is not None:
+        data[CONF_MODEL] = model
+        options.pop(CONF_EFFECT_FAMILIES, None)
+        options.setdefault(CONF_EFFECT_CATEGORIES, list(default_effect_categories(model)))
+        options.setdefault(CONF_PREFIX_EFFECT_NAMES, False)
+        options.setdefault(CONF_ALWAYS_INCLUDE_CUSTOM_EFFECTS, False)
+    hass.config_entries.async_update_entry(entry, data=data, options=options, version=8)
+    return True
+
+
+def _maybe_flag_music_mode_replaced(hass: HomeAssistant, entry: GoveeBLEConfigEntry) -> None:
+    """Warn when a legacy music-mode select remains in the entity registry."""
+    old_id = er.async_get(hass).async_get_entity_id("select", DOMAIN, f"{_addr(entry)}_music_mode")
+    if old_id is None:
+        return
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        "music_mode_replaced",
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="music_mode_replaced",
+        translation_placeholders={"old": old_id},
+    )
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: GoveeBLEConfigEntry) -> bool:
+    assert entry.unique_id is not None
+    if await async_guard_dreamview_entry(hass, entry):
+        raise ConfigEntryNotReady("Config entry is claimed by a DreamView sync centre")
+    raw_model = entry.data.get(CONF_MODEL)
+    model = resolve_model(raw_model) if isinstance(raw_model, str) else None
+    issue_id = _unsupported_model_issue_id(entry)
+    if model is None:
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key="unsupported_model",
+            translation_placeholders={"model": str(raw_model or "missing")},
+        )
+        return False
+    service_info = bluetooth.async_last_service_info(hass, entry.unique_id, connectable=True)
+    advertised_model = model_from_ble_name(service_info.name) if service_info is not None else None
+    if advertised_model is not None and advertised_model != model:
+        _LOGGER.info(
+            "Migrating config entry %s from %s to advertised model %s",
+            entry.entry_id,
+            model,
+            advertised_model,
+        )
+        await _async_migrate_entry_model(hass, entry, old_model=model, new_model=advertised_model)
+        model = advertised_model
+    ir.async_delete_issue(hass, DOMAIN, issue_id)
+    configured_firmware = entry.data.get(CONF_H6102_APP_FIRMWARE)
+    h6102_firmware = configured_firmware if model == "H6102" and isinstance(configured_firmware, str) else None
+    configured_hardware = entry.data.get(CONF_H6102_APP_HARDWARE)
+    coordinator = GoveeBLECoordinator(
+        hass,
+        entry.unique_id,
+        model,
+        configuration_url=editor_url(entry.entry_id)
+        if supported_effect_categories(model) and entry.options.get(CONF_REGISTER_EFFECT_STUDIO, True)
+        else None,
+        connection_mode=entry.options.get(CONF_CONNECTION_MODE, CONNECTION_MODE_RELEASE),
+        effect_families=effect_families_from_options(model, entry.options),
+        effect_categories=effect_categories_from_options(model, entry.options),
+        prefix_effect_names=prefix_effect_names_from_options(entry.options),
+        always_include_custom_effects=always_include_custom_effects_from_options(entry.options),
+        h6102_firmware=h6102_firmware,
+        h6102_firmware_source="configured" if h6102_firmware is not None else None,
+        h6102_hardware=configured_hardware if model == "H6102" and isinstance(configured_hardware, str) else None,
+        h6102_pact=entry.data.get(CONF_H6102_PACT) if model == "H6102" else None,
+    )
+    await coordinator.async_config_entry_first_refresh()
+    entry.runtime_data = coordinator
+    if effect_backend := get_effect_backend(hass):
+        await effect_backend.preview.async_load_device(entry.entry_id)
+        effect_backend.engine.reconcile_current(
+            coordinator,
+            config_entry_id=entry.entry_id,
+            observed_at=dt_util.utcnow().isoformat(),
+            refreshed=True,
+        )
+
+        cancel_sync: CALLBACK_TYPE | None = None
+
+        @callback
+        def sync_effect_observation() -> None:
+            nonlocal cancel_sync
+            cancel_sync = None
+            effect_backend.engine.reconcile_current(
+                coordinator,
+                config_entry_id=entry.entry_id,
+                observed_at=dt_util.utcnow().isoformat(),
+                refreshed=False,
+            )
+
+        @callback
+        def delayed_effect_observation(_now: Any) -> None:
+            sync_effect_observation()
+
+        @callback
+        def schedule_effect_observation() -> None:
+            nonlocal cancel_sync
+            if cancel_sync is None:
+                cancel_sync = async_call_later(
+                    hass,
+                    0.1,
+                    delayed_effect_observation,
+                )
+
+        unsubscribe_observation = coordinator.async_add_listener(
+            schedule_effect_observation,
+        )
+
+        @callback
+        def unsubscribe_effect_observation() -> None:
+            nonlocal cancel_sync
+            unsubscribe_observation()
+            if cancel_sync is not None:
+                cancel_sync()
+                cancel_sync = None
+
+        entry.async_on_unload(unsubscribe_effect_observation)
+    _maybe_flag_music_mode_replaced(hass, entry)
+    await _async_cleanup_legacy_entities(hass, entry)
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await _async_update_editor_panel(hass)
+    return True
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: GoveeBLEConfigEntry) -> bool:
+    effect_backend = get_effect_backend(hass)
+    if effect_backend is not None:
+        await effect_backend.preview.async_unload_device(entry.entry_id)
+    if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        if (coordinator := getattr(entry, "runtime_data", None)) is not None:
+            await coordinator.disconnect()
+        await _async_update_editor_panel(hass)
+    elif effect_backend is not None:
+        await effect_backend.preview.async_load_device(entry.entry_id)
+    return unload_ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: GoveeBLEConfigEntry) -> None:
+    await async_cleanup_dreamview_claims_on_entry_removed(hass, entry.entry_id)
+    effect_backend = get_effect_backend(hass)
+    if effect_backend is not None:
+        await asyncio.gather(
+            effect_backend.scene_defaults.async_delete_device(entry.entry_id),
+            effect_backend.template_defaults.async_delete_device(entry.entry_id),
+            effect_backend.active_workspaces.async_delete_device(entry.entry_id),
+            effect_backend.device_cache.async_delete_device(entry.entry_id),
+            effect_backend.deployments.async_delete_device(entry.entry_id),
+            effect_backend.user_state.async_clear_config_entry(entry.entry_id),
+        )
+    ir.async_delete_issue(hass, DOMAIN, _unsupported_model_issue_id(entry))
+    if entry.unique_id is not None:
+        clear_availability_log_state(hass, entry.unique_id)
+        clear_stale_gatt_recovery(hass, entry.unique_id)
+    await _async_update_editor_panel(hass, excluding_entry_id=entry.entry_id)

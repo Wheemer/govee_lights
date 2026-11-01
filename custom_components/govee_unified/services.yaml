@@ -1,0 +1,134 @@
+swap_light_bars:
+  name: Swap Light Bars
+  description: Swap the left and right H6046 light-bar positions once.  This action has no absolute-position readback and is not automatically repeated after an uncertain write.
+  target: {entity: {integration: govee_unified, domain: light}}
+set_installation_direction:
+  name: Set Installation Direction
+  description: Select H6099 BLE installation direction 2, 3, 4, or 5. Labels are numeric until the APK image orientations are qualified; no corner mapping is implied. Does not enter calibration or change camera position. Requires fresh direction readback for confirmation.
+  target: {entity: {integration: govee_unified, domain: light}}
+  fields:
+    value:
+      required: true
+      selector: {select: {options: ["2", "3", "4", "5"]}}
+read_installation_controls:
+  name: Read Installation Controls
+  description: Read H6099 installation direction and camera health over BLE. Returns direction 2..5 or null, and camera health absent (0), healthy (1), incompatible (2), or unknown for an unrecognized or missing reply. Camera position is separate and is not queried.
+  target: {entity: {integration: govee_unified, domain: light}}
+paint_segments:
+  name: Paint Segments
+  description: Apply the supplied RGB palette to selected logical segments.  RGB scale is an absolute percentage of those supplied colours, not measured brightness.  Zero paints black without changing native power flags.
+  target: {entity: {integration: govee_unified}}
+  fields:
+    groups:
+      required: true
+      example: '[{"segments": [1, 2, 3], "rgb_color": [255, 0, 0]}, {"segments": [4, 5, 6], "rgb_color": [0, 0, 255]}]'
+      selector: {object:}
+    rgb_scale:
+      default: 100
+      selector: {number: {min: 0, max: 100, step: 1, unit_of_measurement: "%"}}
+set_segment_color:
+  target: {entity: {integration: govee_unified}}
+  fields:
+    segments: {required: true, selector: {select: {multiple: true, options: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"]}}}
+    color: {required: true, selector: {color_rgb:}}
+set_segment_color_temp:
+  name: Set Segment Color Temperature
+  description: Apply Kelvin to selected segments within the device's temperature range. H66A0, H1A42 and H61F5 round to the nearest 100 K, with ties rounded up. Confirmation waits for settled rendered RGB, not measured per-segment Kelvin.
+  target: {entity: {integration: govee_unified, domain: light}}
+  fields:
+    segments: {required: true, selector: {select: {multiple: true, options: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"]}}}
+    color_temp_kelvin: {required: true, selector: {number: {min: 1000, max: 10000, step: 1, unit_of_measurement: K, mode: box}}}
+set_segment_brightness:
+  target: {entity: {integration: govee_unified}}
+  fields:
+    segments: {required: true, selector: {select: {multiple: true, options: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"]}}}
+    brightness: {default: 100, selector: {number: {min: 0, max: 100, step: 1, unit_of_measurement: "%"}}}
+apply_custom_effect:
+  target: {entity: {integration: govee_unified, domain: light}}
+  fields:
+    effect:
+      selector: {text:}
+    effect_id:
+      selector: {text:}
+    diy_code:
+      selector: {number: {min: 0, max: 65535, mode: box}}
+replace_dreamview_group:
+  name: Replace DreamView Group
+  description: Advanced action to replace DreamView membership and area assignments on a supported profile; not required to control a group configured in Govee. Matching Home Assistant member config entries are automatically disabled and disconnected before uploading 0x50 so the sync centre can claim their single-client BLE peripheral slots; external member devices not configured in Home Assistant are uploaded directly. Successful replacement restores dropped members that DreamView disabled. Previous device membership cannot be read or recovered. Local authored metadata is not confirmed membership. Supply known cmd_ver and is_rgbic, exactly one address or name, and zones (wire 1..10, 0 unassigned, 255 disabled). Member capacity is target-specific (five for H6199, seven for H6097 and H6099, ten for H66A0). H6199 requires a device acceptance reply; ambiguous changes retain claims and are not automatically replayed. No command-version defaults.
+  target: {entity: {integration: govee_unified, domain: light}}
+  fields:
+    members: {required: true, selector: {object:}}
+delete_dreamview_group:
+  name: Delete DreamView Group
+  description: Explicitly delete the DreamView group on a supported profile and re-enable any Home Assistant member config entries tracked and disabled by DreamView handover. App-created groups do not populate that ownership journal. H6199 requires device acceptance before releasing tracked entries. Retain local authored metadata for manual recovery; deletion cannot be confirmed by membership readback.
+  target: {entity: {integration: govee_unified, domain: light}}
+read_dreamview_group:
+  name: Read DreamView Group
+  description: Query only the target's authorised DreamView reads. Return local authored metadata separately from anonymous observations, missing supported replies, unsupported reads and reads unavailable until current-connection identity is confirmed. Missing replies and zero slots do not prove absent membership. Response contains private locally supplied identities; do not share unredacted.
+  target: {entity: {integration: govee_unified, domain: light}}
+set_dreamview_switch:
+  name: Set DreamView Switch
+  description: Enable or disable synchronisation for an existing DreamView group. Configure membership and areas in Govee, or use the advanced replace_dreamview_group action. Where available, wait for read_dreamview_group to report member connection_bytes at 2 (connected) before enabling. Does not create membership or restore disabled member entries.
+  target: {entity: {integration: govee_unified, domain: light}}
+  fields:
+    enabled: {required: true, selector: {boolean:}}
+set_dreamview_member_brightness:
+  name: Set DreamView Member Brightness
+  description: Set one zero-based slot within the target's member capacity (0..4 for H6199, 0..6 for H6097 and H6099, 0..9 for H66A0). Per-member levels may not apply while same brightness is enabled. Slot identity is not read back.
+  target: {entity: {integration: govee_unified, domain: light}}
+  fields:
+    index: {required: true, selector: {number: {min: 0, max: 255, step: 1}}}
+    level: {required: true, selector: {number: {min: 0, max: 100, step: 1}}}
+set_dreamview_same_brightness:
+  name: Set DreamView Same Brightness
+  description: Enable or disable shared group brightness. H6199 requires main hardware 3.02.01 or newer and firmware 1.09.00 or newer, confirmed on the current connection.
+  target: {entity: {integration: govee_unified, domain: light}}
+  fields:
+    enabled: {required: true, selector: {boolean:}}
+set_dreamview_member_connect:
+  name: Set DreamView Member Connection
+  description: Explicitly connect or disconnect an anonymous zero-based slot within the target's member capacity (0..4 for H6199, 0..6 for H6097 and H6099, 0..9 for H66A0). Does not identify or remove membership.
+  target: {entity: {integration: govee_unified, domain: light}}
+  fields:
+    index: {required: true, selector: {number: {min: 0, max: 255, step: 1}}}
+    connected: {required: true, selector: {boolean:}}
+set_dreamview_saturation:
+  name: Set DreamView Saturation
+  target: {entity: {integration: govee_unified, domain: light}}
+  fields:
+    saturation: {required: true, selector: {number: {min: 0, max: 100, step: 1}}}
+set_dreamview_video_settings:
+  name: Set DreamView Video Settings
+  description: Set DreamView All/Part and Game/Movie together. This does not select the standalone Video effects, which can switch off a running DreamView group.
+  target: {entity: {integration: govee_unified, domain: light}}
+  fields:
+    apply_area:
+      name: Apply area
+      required: true
+      selector:
+        select:
+          options:
+            - {value: all, label: All}
+            - {value: part, label: Part}
+    content_mode:
+      name: Content mode
+      required: true
+      selector:
+        select:
+          options:
+            - {value: game, label: Game}
+            - {value: movie, label: Movie}
+set_dreamview_sample:
+  name: Set DreamView Sample Bytes (Deprecated)
+  description: Migrate to set_dreamview_video_settings. sample_first is apply_area (0 All, 1 Part); sample_second is content_mode (0 Game, 1 Movie). Both raw bytes remain required until this compatibility action is removed.
+  target: {entity: {integration: govee_unified, domain: light}}
+  fields:
+    sample_first: {required: true, selector: {number: {min: 0, max: 255, step: 1}}}
+    sample_second: {required: true, selector: {number: {min: 0, max: 255, step: 1}}}
+set_dreamview_sound_effects:
+  name: Set DreamView Sound Effects
+  description: Supply enabled and softness explicitly; no unproven digest is queried to fill omitted values.
+  target: {entity: {integration: govee_unified, domain: light}}
+  fields:
+    enabled: {required: true, selector: {boolean:}}
+    softness: {required: true, selector: {number: {min: 0, max: 100, step: 1}}}

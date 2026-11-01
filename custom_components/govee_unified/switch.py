@@ -1,0 +1,81 @@
+"""Profile-qualified boolean device settings with fresh readback."""
+
+from typing import Any
+
+from bleak.exc import BleakError
+from homeassistant.components.switch import SwitchEntity
+from homeassistant.const import EntityCategory
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+from . import GoveeBLEConfigEntry
+from .const import DOMAIN
+from .entity import GoveeBLEEntity
+
+PARALLEL_UPDATES = 0
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: GoveeBLEConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    added: set[str] = set()
+
+    def add_qualified() -> None:
+        profile = entry.runtime_data.profile
+        controls = (
+            profile.boolean_controls | ({"low_blue_light"} if profile.supports_low_blue_light else set())
+        ) - added
+        if controls:
+            added.update(controls)
+            async_add_entities([GoveeBLEControlSwitch(entry, control) for control in sorted(controls)])
+
+    add_qualified()
+    entry.async_on_unload(entry.runtime_data.async_add_listener(add_qualified))
+
+
+class GoveeBLEControlSwitch(GoveeBLEEntity, SwitchEntity):
+    _attr_entity_category: EntityCategory | None = EntityCategory.CONFIG
+
+    def __init__(self, entry: GoveeBLEConfigEntry, control: str) -> None:
+        super().__init__(entry.runtime_data)
+        self._control = control
+        self._attr_translation_key = control
+        self._attr_unique_id = f"{self.coordinator.address.replace(':', '').lower()}_{control}"
+        self._attr_device_info = self.coordinator.device_info
+        if control in {"panel_enabled", "ring_enabled", "left_bar_enabled", "right_bar_enabled"}:
+            self._attr_entity_category = None
+            self._attr_entity_registry_visible_default = False
+
+    @property
+    def available(self) -> bool:
+        supported = (
+            self.coordinator.profile.supports_low_blue_light
+            if self._control == "low_blue_light"
+            else self._control in self.coordinator.profile.boolean_controls
+        )
+        return supported and super().available
+
+    @property
+    def is_on(self) -> bool | None:
+        if self._control == "low_blue_light":
+            state = self.coordinator.low_blue_light
+            return state.enabled if state is not None else None
+        return self.coordinator.boolean_control_state.get(self._control)
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self._set(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self._set(False)
+
+    async def _set(self, enabled: bool) -> None:
+        try:
+            if self._control == "low_blue_light":
+                await self.coordinator.async_set_low_blue_light(enabled=enabled)
+            else:
+                await self.coordinator.async_set_boolean_control(self._control, enabled)
+        except (BleakError, ValueError, TimeoutError) as error:
+            raise HomeAssistantError(translation_domain=DOMAIN, translation_key="device_command_failed") from error

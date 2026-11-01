@@ -1,0 +1,1244 @@
+"""Compile canonical effects into model-specific device operations."""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Mapping
+from dataclasses import dataclass
+from enum import StrEnum
+from hashlib import sha256
+from types import MappingProxyType
+from typing import Any, Literal, assert_never
+
+from .const import ModelProfile, get_profile, supported_effect_categories
+from .effect_catalogue import (
+    H617A_TYPE04_APPLY_CODE,
+    H617A_WORKSHOP_APPLY_CODE,
+    H617A_WORKSHOP_SCENE_TYPE,
+    H6099_DIY_APPLY_CODE,
+    H6199_PALETTE_DIY_APPLY_CODE,
+    H6199_PALETTE_DIY_APPLY_MUSIC_CODE,
+    H6199_WORKSHOP_APPLY_CODE,
+    H6199_WORKSHOP_APPLY_MUSIC_CODE,
+    native_diy_template_contract,
+    requires_approved_diy_slot,
+    validate_effect_eligibility,
+    validate_native_diy,
+)
+from .effect_commands import (
+    DiyPaintGroup,
+    build_h617a_diy_multi,
+    build_h617a_diy_painted,
+    build_h617a_diy_single,
+    build_h6179_diy,
+    build_h6199_palette_diy,
+)
+from .effect_contracts import (
+    EFFECT_COMPILER_VERSION,
+    CapabilityWorkflow,
+    require_effect_route,
+)
+from .effect_domain import (
+    BuiltinScene,
+    H6179MixedDiyEffect,
+    H6179SingleDiyEffect,
+    LayeredEffect,
+    LayeredScene,
+    LibraryItem,
+    MultiEffect,
+    MusicProfile,
+    NativeEffect,
+    OpaqueContent,
+    PaintedEffect,
+    PaletteDiyEffect,
+    PaletteScene,
+    SingleEffect,
+    VideoProfile,
+    WorkshopEffect,
+)
+from .generated_protocol_adapter import build_diy_activation, build_scene_activation
+from .h60a6_effects import encode_native_body
+from .layered_scene import CatalogueRef
+from .layered_scene_decoder import encode_layered_scene, encode_workshop_effect
+from .music_commands import resolve_music_profile
+from .music_protocol import music_code_for
+from .music_semantics import music_parameters_depend_on_ic, music_variant
+from .native_effect import NativeDiyLayer
+from .native_scenes import apply_scene_speed, build_native_scene_packets, encode_authored_scene_body
+from .protocol_core import H60a6EffectFrame, H6199EffectUpload, SceneBody
+from .scenes import MODEL_SCENES, SceneEntry, resolve_scene_identity, scene_for_profile, scene_selector_code
+from .transport import fragment_a3
+
+
+class CompatibilityState(StrEnum):
+    COMPATIBLE = "compatible"
+    INCOMPATIBLE = "incompatible"
+    UNKNOWN = "unknown"
+
+
+class ActivationMode(StrEnum):
+    CUSTOM = "custom"
+    SCENE = "scene"
+
+
+@dataclass(frozen=True, slots=True)
+class CompatibilityResult:
+    state: CompatibilityState
+    reasons: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledEffect:
+    item_id: str
+    item_version: int
+    model: str
+    content_kind: str
+    diy_code: int | None
+    activation_mode: ActivationMode
+    expected_effect: str | None
+    upload_packets: tuple[bytes, ...]
+    activation_packet: bytes | None
+    artifact_sha256: str
+    selector_kind: Literal["diy", "scene"] = "diy"
+    evidence_codes: tuple[str, ...] = ()
+    compiler_version: int = EFFECT_COMPILER_VERSION
+    physical_ic_count: int | None = None
+    upload_transport: str = "a3"
+    scene_entry: SceneEntry | None = None
+    scene_route: tuple[str | None, str | None, int | None] | None = None
+    upload_subtype: int | None = None
+    body_template_id: int | None = None
+    body_effect_code: int | None = None
+
+    @property
+    def packets(self) -> tuple[bytes, ...]:
+        return self.upload_packets if self.activation_packet is None else (*self.upload_packets, self.activation_packet)
+
+    @property
+    def progress_total(self) -> int:
+        return len(self.packets)
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledMusicProfile:
+    item_id: str
+    item_version: int
+    model: str
+    mode: str
+    sensitivity: int
+    colour: tuple[int, int, int] | None
+    calm: bool
+    parameters: Mapping[str, int | bool | str]
+    artifact_sha256: str
+    packets: tuple[bytes, ...]
+    physical_ic_count: int | None = None
+    compiler_version: int = EFFECT_COMPILER_VERSION
+    content_kind: str = "music_profile"
+    diy_code: None = None
+    palette: tuple[tuple[int, int, int], ...] | None = None
+
+    @property
+    def progress_total(self) -> int:
+        return 1 + int(len(self.packets) > 2)
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledVideoProfile:
+    item_id: str
+    item_version: int
+    model: str
+    mode: str
+    full_screen: bool | None
+    saturation: int | None
+    sound_effects: bool | None
+    sound_effects_softness: int | None
+    white_balance_position: int | None
+    relative_brightness: tuple[int, ...] | None
+    blank_screen: bool | None
+    artifact_sha256: str
+    white_balance_wire: tuple[int, ...] | None = None
+    black_border: bool | None = None
+    blank_screen_policy: tuple[int, int, int] | None = None
+    compiler_version: int = EFFECT_COMPILER_VERSION
+    content_kind: str = "video_profile"
+    diy_code: None = None
+
+    @property
+    def progress_total(self) -> int:
+        return 1 + sum(
+            (
+                self.white_balance_wire is not None,
+                self.relative_brightness is not None,
+                self.blank_screen is not None,
+                self.black_border is not None,
+            )
+        )
+
+
+CompiledApplication = CompiledEffect | CompiledMusicProfile | CompiledVideoProfile
+
+
+def validate_compiled_geometry(compiled: CompiledApplication, profile: ModelProfile) -> None:
+    """Reject prepared work after incompatible permission, encoding or geometry changes."""
+    if isinstance(compiled, CompiledEffect):
+        if compiled.body_template_id is not None:
+            contract = native_diy_template_contract(compiled.model, compiled.body_template_id)
+            supported = (
+                profile.supports_custom_effects
+                and contract is not None
+                and compiled.content_kind == "advanced"
+                and compiled.activation_mode is ActivationMode.CUSTOM
+                and compiled.selector_kind == "diy"
+                and compiled.upload_subtype == contract.upload_subtype
+                and compiled.body_effect_code == contract.body_effect
+            )
+        else:
+            supported = (
+                profile.supports_scenes
+                if compiled.content_kind in {"scene_builtin", "scene_palette", "scene_layered"}
+                or compiled.scene_entry is not None
+                else profile.supports_advanced_effects
+                if compiled.content_kind in {"advanced", "workshop"}
+                else profile.supports_custom_effects
+            )
+        if not supported:
+            raise ValueError("Device profile no longer supports the compiled effect")
+        if compiled.content_kind == "native_effect" and profile.effect_grammar != "H60A6":
+            raise ValueError("Device native effect grammar changed since compilation")
+        if compiled.scene_entry is not None:
+            entry = scene_for_profile(compiled.scene_entry, profile)
+            if compiled.scene_route != (
+                profile.command_grammar,
+                profile.effect_grammar,
+                profile.selector_only_scene_bits,
+            ) or compiled.diy_code != scene_selector_code(compiled.model, entry, profile=profile):
+                raise ValueError("Device scene route changed since compilation; refresh and retry")
+        if compiled.content_kind in {"h617a_single", "h617a_multi"}:
+            transport = "a1_02" if profile.a1_diy_selector is not None else "a3"
+            if compiled.upload_transport != transport or (
+                transport == "a1_02" and compiled.diy_code != profile.a1_diy_selector
+            ):
+                raise ValueError("Device upload transport or selector changed since compilation")
+        if compiled.content_kind in {"h6179_single_diy", "h6179_mixed_diy"}:
+            if compiled.upload_transport != profile.diy_upload_transport:
+                raise ValueError("Device DIY transport changed since compilation")
+        if profile.effect_workflows is not None:
+            workflow = {
+                "scene_builtin": CapabilityWorkflow.NATIVE_SCENES,
+                "scene_palette": CapabilityWorkflow.EDITED_PALETTE_SCENES,
+                "scene_layered": CapabilityWorkflow.LAYERED_SCENES,
+                "h617a_painted": CapabilityWorkflow.PAINTED,
+                "h617a_single": CapabilityWorkflow.SINGLE,
+                "h617a_multi": CapabilityWorkflow.MULTI,
+                "advanced": CapabilityWorkflow.ADVANCED,
+                "workshop": CapabilityWorkflow.WORKSHOP,
+                "palette_diy": CapabilityWorkflow.PALETTE_DIY,
+                "h6179_single_diy": CapabilityWorkflow.SINGLE,
+                "h6179_mixed_diy": CapabilityWorkflow.MULTI,
+                "native_effect": CapabilityWorkflow.LAYERED_SCENES
+                if compiled.scene_entry is not None
+                else CapabilityWorkflow.PAINTED
+                if compiled.upload_transport == "a4"
+                else CapabilityWorkflow.SINGLE,
+            }.get(compiled.content_kind)
+            if workflow is None or workflow.value not in profile.effect_workflows:
+                raise ValueError("Device profile no longer supports the compiled workflow")
+    if isinstance(compiled, CompiledVideoProfile):
+        if compiled.mode not in profile.video_modes:
+            raise ValueError("Device profile no longer supports the compiled video mode")
+        return
+    dependent = compiled.physical_ic_count is not None
+    if isinstance(compiled, CompiledMusicProfile):
+        if compiled.mode not in profile.music_modes:
+            raise ValueError("Device profile no longer supports the compiled music mode")
+        variant = music_variant(
+            profile,
+            music_code_for(compiled.model, compiled.mode, profile=profile),
+        )
+        if compiled.calm and (variant is None or not variant.supports_style):
+            raise ValueError("Device profile no longer supports the compiled music style")
+        if compiled.colour is not None and (
+            not profile.supports_music_color or variant is None or not variant.supports_fixed_colour
+        ):
+            raise ValueError("Device profile no longer supports the compiled music colour")
+        dependent = music_parameters_depend_on_ic(variant, compiled.parameters)
+    if dependent and compiled.physical_ic_count != profile.physical_ic_count:
+        raise ValueError("Physical IC count changed since compilation; refresh and retry")
+
+
+def require_native_scenes(model: str, profile: ModelProfile) -> None:
+    """Authorize native scenes against both the effective profile and model contract."""
+    if not profile.supports_scenes:
+        raise ValueError(f"{model} native scenes are not supported")
+    require_effect_route(model, CapabilityWorkflow.NATIVE_SCENES, profile=profile)
+
+
+def compatibility(item: LibraryItem, model: str, *, profile: ModelProfile | None = None) -> CompatibilityResult:
+    profile = get_profile(model) if profile is None else profile
+    if profile.command_operations is not None and not supported_effect_categories(model, profile=profile):
+        return CompatibilityResult(CompatibilityState.INCOMPATIBLE, ("Device profile supports no effects",))
+    content = item.content
+    if isinstance(content, OpaqueContent):
+        return CompatibilityResult(
+            CompatibilityState.UNKNOWN,
+            (f"content kind {content.kind!r} is not understood",),
+        )
+    if isinstance(content, MusicProfile):
+        if content.model != model:
+            return CompatibilityResult(
+                CompatibilityState.INCOMPATIBLE,
+                (f"music profile targets {content.model}, not {model}",),
+            )
+        try:
+            resolve_music_profile(
+                model,
+                content.mode,
+                content.sensitivity,
+                content.colour,
+                content.calm,
+                content.parameters,
+                profile=profile,
+                palette=content.palette,
+            )
+        except ValueError as error:
+            return CompatibilityResult(CompatibilityState.INCOMPATIBLE, (str(error),))
+        return CompatibilityResult(CompatibilityState.COMPATIBLE)
+    if isinstance(content, VideoProfile):
+        try:
+            content.__post_init__()
+            if content.saturation is not None:
+                profile.validate_video_saturation(content.saturation)
+        except ValueError as error:
+            return CompatibilityResult(CompatibilityState.INCOMPATIBLE, (str(error),))
+        if content.model != model or not profile.supports_video_mode or profile.video_grammar is None:
+            return CompatibilityResult(
+                CompatibilityState.INCOMPATIBLE,
+                (f"{model} video-profile application is not supported",),
+            )
+        if content.mode not in profile.video_modes:
+            return CompatibilityResult(
+                CompatibilityState.INCOMPATIBLE,
+                (f"{model} does not support video mode {content.mode}",),
+            )
+        return CompatibilityResult(CompatibilityState.COMPATIBLE)
+    if isinstance(content, H6179SingleDiyEffect | H6179MixedDiyEffect):
+        if model != "H6179" or content.model != model:
+            return CompatibilityResult(
+                CompatibilityState.INCOMPATIBLE,
+                (f"{model} cannot apply H6179 DIY content",),
+            )
+        workflow = CapabilityWorkflow.SINGLE if isinstance(content, H6179SingleDiyEffect) else CapabilityWorkflow.MULTI
+        try:
+            require_effect_route(model, workflow, ("H6179",), profile=profile)
+        except ValueError as error:
+            return CompatibilityResult(CompatibilityState.INCOMPATIBLE, (str(error),))
+        return CompatibilityResult(CompatibilityState.COMPATIBLE)
+    if isinstance(content, WorkshopEffect):
+        if content.model != model:
+            return CompatibilityResult(
+                CompatibilityState.INCOMPATIBLE,
+                (f"Workshop effect targets {content.model}, not {model}",),
+            )
+        try:
+            workshop_apply_code(model, profile=profile)
+        except ValueError as error:
+            return CompatibilityResult(CompatibilityState.INCOMPATIBLE, (str(error),))
+        return CompatibilityResult(CompatibilityState.COMPATIBLE)
+    if isinstance(content, NativeEffect):
+        try:
+            workflow = (
+                CapabilityWorkflow.LAYERED_SCENES
+                if content.template is not None
+                else CapabilityWorkflow.PAINTED
+                if content.family == 798
+                else CapabilityWorkflow.ADVANCED
+                if content.preset_id in (11, 12)
+                else CapabilityWorkflow.SINGLE
+            )
+            require_effect_route(model, workflow, ("H60A6",), profile=profile)
+            if content.model != model or not profile.supports_custom_effects:
+                raise ValueError("native content does not match the target profile")
+            if content.family == 798 and profile.physical_ic_count != 133:
+                raise ValueError("native paint requires the exact 133-point geometry")
+            if content.template is not None:
+                _key, entry = _resolve_scene(model, content.template, expected_scene_type=5)
+                if entry.diy_effect_codes != (content.family,):
+                    raise ValueError("native scene family does not match its catalogue")
+                if content.speed_index is not None and (
+                    entry.speed is None or content.speed_index >= entry.speed.option_count
+                ):
+                    raise ValueError("native scene speed index is not present in its catalogue")
+            elif any(
+                isinstance(layer, NativeDiyLayer) and not 1 <= len(layer.palette) <= 8 for layer in content.layers
+            ):
+                raise ValueError("native DIY palette must contain 1 to 8 colours")
+            resolve_diy_code(item, model=model, profile=profile)
+            encode_native_body(content)
+        except ValueError as error:
+            return CompatibilityResult(CompatibilityState.INCOMPATIBLE, (str(error),))
+        return CompatibilityResult(CompatibilityState.COMPATIBLE)
+    if isinstance(content, BuiltinScene):
+        if not profile.supports_scenes:
+            return CompatibilityResult(
+                CompatibilityState.INCOMPATIBLE,
+                (f"{model} native scenes are not supported",),
+            )
+        if content.template.sku != model:
+            return CompatibilityResult(
+                CompatibilityState.INCOMPATIBLE,
+                (f"scene targets {content.template.sku}, not {model}",),
+            )
+        try:
+            require_native_scenes(model, profile)
+            _scene_key, entry = _resolve_scene(model, content.template)
+            build_native_scene_packets(
+                model,
+                entry,
+                speed_index=content.speed_index,
+                profile=profile,
+            )
+        except ValueError as error:
+            return CompatibilityResult(CompatibilityState.INCOMPATIBLE, (str(error),))
+        return CompatibilityResult(CompatibilityState.COMPATIBLE)
+    if isinstance(content, PaletteDiyEffect):
+        if content.model != model:
+            return CompatibilityResult(
+                CompatibilityState.INCOMPATIBLE,
+                (f"palette DIY targets {content.model}, not {model}",),
+            )
+    if isinstance(content, PaintedEffect | SingleEffect | MultiEffect | PaletteDiyEffect):
+        try:
+            if requires_approved_diy_slot(model) and isinstance(content, PaintedEffect | SingleEffect | MultiEffect):
+                require_effect_route(
+                    model,
+                    CapabilityWorkflow.PAINTED
+                    if isinstance(content, PaintedEffect)
+                    else CapabilityWorkflow.SINGLE
+                    if isinstance(content, SingleEffect)
+                    else CapabilityWorkflow.MULTI,
+                    ("H6046", "H617A", "H6099"),
+                    profile=profile,
+                )
+            else:
+                resolve_diy_code(item, model=model, profile=profile)
+            validate_effect_eligibility(content, model, profile=profile)
+        except ValueError as error:
+            return CompatibilityResult(CompatibilityState.INCOMPATIBLE, (str(error),))
+        return CompatibilityResult(CompatibilityState.COMPATIBLE)
+    if isinstance(content, PaletteScene | LayeredScene):
+        if not profile.supports_scenes:
+            return CompatibilityResult(
+                CompatibilityState.INCOMPATIBLE,
+                (f"{model} authored scenes are not supported",),
+            )
+        if content.template.sku != model:
+            return CompatibilityResult(
+                CompatibilityState.INCOMPATIBLE,
+                (f"scene targets {content.template.sku}, not {model}",),
+            )
+        try:
+            require_effect_route(
+                model,
+                CapabilityWorkflow.EDITED_PALETTE_SCENES
+                if isinstance(content, PaletteScene)
+                else CapabilityWorkflow.LAYERED_SCENES,
+                profile=profile,
+            )
+            _resolve_scene(
+                model,
+                content.template,
+                expected_scene_type=1 if isinstance(content, PaletteScene) else 2,
+            )
+            if isinstance(content, PaletteScene) and content.speed_index is not None:
+                raise ValueError("type-1 palette scenes do not expose a documented Speed control")
+        except ValueError as error:
+            return CompatibilityResult(CompatibilityState.INCOMPATIBLE, (str(error),))
+        return CompatibilityResult(CompatibilityState.COMPATIBLE)
+    if isinstance(content, LayeredEffect):
+        try:
+            if get_profile(model).supports_advanced_effects and not profile.supports_advanced_effects:
+                raise ValueError(f"{model} effective profile does not support Advanced effects")
+            require_effect_route(model, CapabilityWorkflow.ADVANCED, profile=profile)
+            if content.native_diy is not None:
+                validate_native_diy(content, model, profile)
+            elif profile.advanced_diy_selector is None:
+                _advanced_carrier(model)
+        except ValueError as error:
+            return CompatibilityResult(CompatibilityState.INCOMPATIBLE, (str(error),))
+        return CompatibilityResult(CompatibilityState.COMPATIBLE)
+    assert_never(content)
+
+
+def compile_effect(
+    item: LibraryItem,
+    model: str,
+    *,
+    diy_code: int | None = None,
+    profile: ModelProfile | None = None,
+) -> CompiledEffect:
+    result = compatibility(item, model, profile=profile)
+    if result.state is not CompatibilityState.COMPATIBLE:
+        raise ValueError("; ".join(result.reasons))
+    if isinstance(item.content, H6179SingleDiyEffect | H6179MixedDiyEffect):
+        if diy_code is None:
+            raise ValueError("H6179 DIY application requires an approved disposable DIY code")
+        return compile_h6179(item, diy_code, profile=profile)
+    if isinstance(item.content, NativeEffect):
+        return compile_native_effect(item, model, diy_code=diy_code, profile=profile)
+    if isinstance(item.content, PaintedEffect | SingleEffect | MultiEffect):
+        if _has_fixed_diy_slot(model, profile=profile):
+            diy_code = resolve_diy_code(item, diy_code, model=model, profile=profile)
+        if diy_code is None:
+            raise ValueError("H617A custom-effect compilation requires a DIY code")
+        return compile_h617a(item, diy_code, model=model, profile=profile)
+    if isinstance(item.content, PaletteDiyEffect):
+        return compile_h6199(
+            item,
+            H6199_PALETTE_DIY_APPLY_CODE if diy_code is None else diy_code,
+            model=model,
+            profile=profile,
+        )
+    if isinstance(item.content, BuiltinScene | PaletteScene | LayeredScene | LayeredEffect):
+        resolved_diy_code = diy_code
+        if isinstance(item.content, LayeredEffect) and item.content.native_diy is not None:
+            resolved_diy_code = resolve_diy_code(item, diy_code, model=model, profile=profile)
+        return compile_scene_effect(item, model, diy_code=resolved_diy_code, profile=profile)
+    if isinstance(item.content, WorkshopEffect):
+        resolve_diy_code(item, diy_code, model=model, profile=profile)
+        return _compile_workshop_effect(item, model, profile=profile)
+    raise ValueError("unsupported effect content")
+
+
+def _has_fixed_diy_slot(model: str, *, profile: ModelProfile | None = None) -> bool:
+    from .effect_catalogue import MODEL_EFFECT_CATALOGUES
+
+    profile = get_profile(model) if profile is None else profile
+    catalogue = MODEL_EFFECT_CATALOGUES.get(model)
+    return (
+        profile.effect_grammar == "H6099"
+        or profile.a1_diy_selector is not None
+        or catalogue is not None
+        and catalogue.temporary_diy_selector is not None
+    )
+
+
+def workshop_apply_code(model: str, *, profile: ModelProfile | None = None) -> int:
+    """Require Workshop authorization and an evidenced grammar/activation pair."""
+    grammar = require_effect_route(model, CapabilityWorkflow.WORKSHOP, profile=profile)
+    return H617A_WORKSHOP_APPLY_CODE if grammar in {"H6046", "H617A"} else H6199_WORKSHOP_APPLY_CODE
+
+
+def resolve_diy_code(
+    item: LibraryItem,
+    requested: int | None = None,
+    *,
+    model: str | None = None,
+    profile: ModelProfile | None = None,
+) -> int | None:
+    """Resolve a custom selector; scene and profile applications return None."""
+    content = item.content
+    if isinstance(content, NativeEffect):
+        if content.template is not None:
+            if requested is not None:
+                raise ValueError("native scenes use their catalogue selector, not a DIY slot")
+            return None
+        model = content.model if model is None else model
+        if model != content.model:
+            raise ValueError("native content targets another model")
+        from .effect_catalogue import MODEL_EFFECT_CATALOGUES
+
+        catalogue = MODEL_EFFECT_CATALOGUES.get(model)
+        selector = None if catalogue is None else catalogue.temporary_diy_selector
+        if selector is None or requested is not None and requested != selector:
+            raise ValueError("native DIY requires its exact temporary selector")
+        return selector
+    if isinstance(content, LayeredEffect) and content.native_diy is not None:
+        if model is not None:
+            from .effect_catalogue import MODEL_EFFECT_CATALOGUES
+
+            require_effect_route(model, CapabilityWorkflow.ADVANCED, profile=profile)
+            catalogue = MODEL_EFFECT_CATALOGUES.get(model)
+            if catalogue is None or not any(
+                isinstance(template.content, LayeredEffect) and template.content.native_diy == content.native_diy
+                for template in catalogue.templates
+            ):
+                raise ValueError("native DIY template is not in the exact-model catalogue")
+        if model is not None and requires_approved_diy_slot(model):
+            if requested is None:
+                raise ValueError(f"{model} native DIY application requires an explicitly approved disposable DIY code")
+            if not isinstance(requested, int) or isinstance(requested, bool) or not 0 <= requested <= 0xFFFF:
+                raise ValueError("DIY code must be an integer from 0 to 65535")
+            return requested
+        if requested is not None and requested != content.native_diy:
+            raise ValueError("native DIY requires its own template selector")
+        return content.native_diy
+    if isinstance(content, MusicProfile | VideoProfile):
+        if requested is not None:
+            raise ValueError("profiles do not use a DIY code")
+        return None
+    if isinstance(content, H6179SingleDiyEffect | H6179MixedDiyEffect):
+        model = content.model if model is None else model
+        if content.model != model:
+            raise ValueError(f"effect targets {content.model}, not {model}")
+        workflow = CapabilityWorkflow.SINGLE if isinstance(content, H6179SingleDiyEffect) else CapabilityWorkflow.MULTI
+        require_effect_route(model, workflow, ("H6179",), profile=profile)
+        if requested is None:
+            raise ValueError("H6179 DIY application requires an explicitly approved disposable DIY code")
+        if not isinstance(requested, int) or isinstance(requested, bool) or not 0 <= requested <= 0xFFFF:
+            raise ValueError("DIY code must be an integer from 0 to 65535")
+        return requested
+    if isinstance(content, WorkshopEffect | PaletteDiyEffect):
+        model = content.model if model is None else model
+        if content.model != model:
+            raise ValueError(f"effect targets {content.model}, not {model}")
+        if isinstance(content, WorkshopEffect):
+            expected = workshop_apply_code(model, profile=profile)
+        else:
+            require_effect_route(model, CapabilityWorkflow.PALETTE_DIY, ("H6199",), profile=profile)
+            expected = H6199_PALETTE_DIY_APPLY_CODE
+        if requested is not None and requested != expected:
+            raise ValueError(f"{model} has no evidenced activation packet for the requested slot; expected {expected}")
+        return expected
+    if isinstance(content, PaintedEffect | SingleEffect | MultiEffect):
+        workflow = (
+            CapabilityWorkflow.PAINTED
+            if isinstance(content, PaintedEffect)
+            else CapabilityWorkflow.SINGLE
+            if isinstance(content, SingleEffect)
+            else CapabilityWorkflow.MULTI
+        )
+        profile = get_profile("H617A" if model is None else model) if profile is None else profile
+        grammar = require_effect_route(
+            "H617A" if model is None else model, workflow, ("H6046", "H617A", "H6099"), profile=profile
+        )
+        a1_selector = None if isinstance(content, PaintedEffect) else profile.a1_diy_selector
+        approved_slot = model is not None and requires_approved_diy_slot(model)
+        if model is not None:
+            from .effect_catalogue import MODEL_EFFECT_CATALOGUES
+
+            catalogue = MODEL_EFFECT_CATALOGUES.get(model)
+            fixed_selector = None if catalogue is None else catalogue.temporary_diy_selector
+            if fixed_selector is not None:
+                if requested is not None and requested != fixed_selector:
+                    raise ValueError(f"{model} custom effects require temporary selector {fixed_selector}")
+                return fixed_selector
+        if approved_slot and requested is None:
+            raise ValueError(f"{model} custom-effect application requires an explicitly approved disposable DIY code")
+        code = (
+            (
+                H6099_DIY_APPLY_CODE
+                if grammar == "H6099"
+                else a1_selector
+                if a1_selector is not None
+                else 800
+                if isinstance(content, PaintedEffect)
+                else H617A_TYPE04_APPLY_CODE
+            )
+            if requested is None
+            else requested
+        )
+        if not isinstance(code, int) or isinstance(code, bool) or not 0 <= code <= 0xFFFF:
+            raise ValueError("DIY code must be an integer from 0 to 65535")
+        if a1_selector is not None and code != a1_selector:
+            raise ValueError(f"{model} custom effects use the A1 selector 0x{a1_selector:02x}")
+        return code
+    return None
+
+
+def _compile_workshop_effect(
+    item: LibraryItem,
+    model: str,
+    *,
+    profile: ModelProfile | None = None,
+) -> CompiledEffect:
+    profile = get_profile(model) if profile is None else profile
+    diy_code = workshop_apply_code(model, profile=profile)
+    grammar = profile.effect_grammar
+    content = item.content
+    if isinstance(content, WorkshopEffect):
+        payload = encode_workshop_effect(
+            model,
+            content.effect,
+            trailing_padding=content.trailing_padding,
+            profile=profile,
+        )
+        body_kind = int(H6199EffectUpload.BodyKind.scene) if grammar == "H6199" else int(SceneBody.SceneType.scene_v2)
+        upload = tuple(fragment_a3(body_kind, payload))
+        content_kind = "workshop"
+    else:
+        raise ValueError("content is not an upload-only effect")
+
+    activation = build_scene_activation(
+        model, diy_code, H6199_WORKSHOP_APPLY_MUSIC_CODE, scene_type=H617A_WORKSHOP_SCENE_TYPE, profile=profile
+    )
+    packets = (*upload, activation)
+    return CompiledEffect(
+        item_id=str(item.id),
+        item_version=item.version,
+        model=model,
+        content_kind=content_kind,
+        diy_code=diy_code,
+        activation_mode=ActivationMode.CUSTOM,
+        selector_kind="scene",
+        expected_effect=None,
+        upload_packets=upload,
+        activation_packet=activation,
+        artifact_sha256=sha256(b"".join(packets)).hexdigest(),
+        evidence_codes=(
+            "effect_content_readback_unavailable",
+            *(("native_diy_positive_ack_required",) if profile.diy_requires_upload_ack else ()),
+        ),
+        upload_subtype=body_kind,
+    )
+
+
+def compile_scene_effect(
+    item: LibraryItem,
+    model: str,
+    *,
+    diy_code: int | None = None,
+    profile: ModelProfile | None = None,
+) -> CompiledEffect:
+    result = compatibility(item, model, profile=profile)
+    if result.state is not CompatibilityState.COMPATIBLE:
+        raise ValueError("; ".join(result.reasons))
+
+    content = item.content
+    profile = get_profile(model) if profile is None else profile
+    if isinstance(content, LayeredEffect) and (
+        content.native_diy is not None or profile.advanced_diy_selector is not None
+    ):
+        contract = native_diy_template_contract(model, content.native_diy)
+        selector = (
+            diy_code
+            if contract is not None and requires_approved_diy_slot(model)
+            else content.native_diy
+            if content.native_diy is not None
+            else profile.advanced_diy_selector
+        )
+        assert selector is not None
+        subtype = contract.upload_subtype if contract is not None else int(SceneBody.SceneType.scene_v2)
+        upload = tuple(fragment_a3(subtype, encode_workshop_effect(model, content, profile=profile)))
+        activation = (
+            build_diy_activation(selector, model, profile=profile)
+            if contract is not None and requires_approved_diy_slot(model)
+            else build_scene_activation(model, selector, 0, profile=profile)
+        )
+        return CompiledEffect(
+            item_id=str(item.id),
+            item_version=item.version,
+            model=model,
+            content_kind="advanced",
+            diy_code=selector,
+            activation_mode=ActivationMode.CUSTOM,
+            selector_kind="diy" if contract is not None and requires_approved_diy_slot(model) else "scene",
+            expected_effect=None,
+            upload_packets=upload,
+            activation_packet=activation,
+            artifact_sha256=sha256(b"".join((*upload, activation))).hexdigest(),
+            evidence_codes=(
+                *(
+                    ("native_diy_positive_ack_required",)
+                    if contract is not None or profile.diy_requires_upload_ack or profile.supports_color_mode_readback
+                    else ()
+                ),
+                "effect_content_readback_unavailable",
+                "native_diy_rendering_unqualified",
+            ),
+            physical_ic_count=profile.physical_ic_count
+            if content.native_diy is not None and validate_native_diy(content, model, profile)
+            else None,
+            upload_subtype=subtype,
+            body_template_id=content.native_diy if contract is not None else None,
+            body_effect_code=contract.body_effect if contract is not None else None,
+        )
+    evidence_codes: list[str] = []
+    if isinstance(content, BuiltinScene):
+        content_kind = "scene_builtin"
+        scene_key, entry = _resolve_scene(model, content.template)
+        packets = tuple(
+            build_native_scene_packets(
+                model,
+                entry,
+                speed_index=content.speed_index,
+                profile=profile,
+            )
+        )
+        upload = packets[:-1]
+        activation = packets[-1]
+        if upload:
+            evidence_codes.append("scene_payload_readback_unavailable")
+    elif isinstance(content, PaletteScene):
+        content_kind = "scene_palette"
+        scene_key, entry = _resolve_scene(model, content.template, expected_scene_type=1)
+        scene_type = 1
+        payload, _speed = encode_authored_scene_body(content, entry)
+        upload = tuple(fragment_a3(scene_type, payload))
+        activation = build_scene_activation(
+            model, scene_selector_code(model, entry, profile=profile), entry.music_code, profile=profile
+        )
+        evidence_codes.append("scene_payload_readback_unavailable")
+    elif isinstance(content, LayeredScene):
+        content_kind = "scene_layered"
+        scene_key, entry = _resolve_scene(model, content.template, expected_scene_type=2)
+        scene_type = 2
+        payload, _speed = encode_authored_scene_body(content, entry)
+        upload = tuple(fragment_a3(scene_type, payload))
+        activation = build_scene_activation(
+            model, scene_selector_code(model, entry, profile=profile), entry.music_code, profile=profile
+        )
+        evidence_codes.extend(
+            (
+                "scene_payload_readback_unavailable",
+                "layered_field_semantics_uncalibrated",
+            )
+        )
+    elif isinstance(content, LayeredEffect):
+        content_kind = "advanced"
+        scene_key, entry = _advanced_carrier(model)
+        scene_type = 2
+        payload = encode_layered_scene(
+            LayeredScene(
+                template=CatalogueRef(model, entry.scene_id, entry.effect_id),
+                effect=content,
+            )
+        )
+        evidence_codes.extend(
+            (
+                "scene_payload_readback_unavailable",
+                "layered_field_semantics_uncalibrated",
+                "layered_activation_carrier_uncalibrated",
+            )
+        )
+        upload = tuple(fragment_a3(scene_type, payload))
+        activation = build_scene_activation(
+            model, scene_selector_code(model, entry, profile=profile), entry.music_code, profile=profile
+        )
+    else:
+        raise ValueError("unsupported scene effect content")
+
+    if upload and profile.diy_requires_upload_ack:
+        evidence_codes.append("native_diy_positive_ack_required")
+    digest = sha256(b"".join((*upload, activation))).hexdigest()
+    return CompiledEffect(
+        item_id=str(item.id),
+        item_version=item.version,
+        model=model,
+        content_kind=content_kind,
+        diy_code=scene_selector_code(model, entry, profile=profile),
+        activation_mode=ActivationMode.SCENE,
+        selector_kind="scene",
+        expected_effect=scene_key,
+        upload_packets=upload,
+        activation_packet=activation,
+        artifact_sha256=digest,
+        evidence_codes=tuple(evidence_codes),
+        scene_entry=entry,
+        scene_route=(profile.command_grammar, profile.effect_grammar, profile.selector_only_scene_bits),
+        upload_subtype=_builtin_upload_route(entry, profile)[1]
+        if upload and isinstance(content, BuiltinScene)
+        else entry.scene_type
+        if upload
+        else None,
+        upload_transport=_builtin_upload_route(entry, profile)[0]
+        if upload and isinstance(content, BuiltinScene)
+        else "a3",
+    )
+
+
+def _builtin_upload_route(entry: SceneEntry, profile: ModelProfile) -> tuple[str, int]:
+    from .native_scenes import native_scene_upload_route
+
+    route = native_scene_upload_route(entry, profile)
+    if route is None:
+        raise ValueError("scene packets have no admitted upload route")
+    return route
+
+
+def compile_native_effect(
+    item: LibraryItem,
+    model: str,
+    *,
+    diy_code: int | None = None,
+    profile: ModelProfile | None = None,
+) -> CompiledEffect:
+    from .transport import fragment_a4
+
+    profile = get_profile(model) if profile is None else profile
+    content = item.content
+    if not isinstance(content, NativeEffect):
+        raise ValueError("native compiler requires native content")
+    result = compatibility(item, model, profile=profile)
+    if result.state is CompatibilityState.INCOMPATIBLE:
+        raise ValueError("; ".join(result.reasons))
+    route = "a4" if content.family == 798 else "a3"
+    subtype = int(H60a6EffectFrame.Subtype.native_effect)
+    body = encode_native_body(content)
+    entry = None
+    scene_key = None
+    if content.template is not None:
+        if diy_code is not None:
+            raise ValueError("native scenes do not accept a temporary DIY selector")
+        scene_key, entry = _resolve_scene(model, content.template, expected_scene_type=5)
+        if content.speed_index is not None:
+            assert entry.speed is not None
+            body = apply_scene_speed(body, entry.speed, content.speed_index)
+        selector = scene_selector_code(model, entry, profile=profile)
+        activation = build_scene_activation(model, selector, entry.music_code, profile=profile)
+    else:
+        custom_selector = resolve_diy_code(item, diy_code, model=model, profile=profile)
+        assert custom_selector is not None
+        selector = custom_selector
+        activation = build_diy_activation(selector, model, profile=profile)
+    upload = tuple((fragment_a4 if route == "a4" else fragment_a3)(subtype, body))
+    return CompiledEffect(
+        item_id=str(item.id),
+        item_version=item.version,
+        model=model,
+        content_kind="native_effect",
+        diy_code=selector,
+        activation_mode=ActivationMode.SCENE if entry is not None else ActivationMode.CUSTOM,
+        selector_kind="scene" if entry is not None else "diy",
+        expected_effect=scene_key,
+        upload_packets=upload,
+        activation_packet=activation,
+        artifact_sha256=sha256(b"".join((*upload, activation))).hexdigest(),
+        evidence_codes=(
+            ("native_diy_positive_ack_required", "effect_content_readback_unavailable")
+            if profile.diy_requires_upload_ack
+            else ("effect_content_readback_unavailable",)
+        ),
+        upload_transport=route,
+        upload_subtype=subtype,
+        physical_ic_count=profile.physical_ic_count if content.family == 798 else None,
+        scene_entry=entry,
+        scene_route=(profile.command_grammar, profile.effect_grammar, profile.selector_only_scene_bits)
+        if entry is not None
+        else None,
+    )
+
+
+def compile_h617a(
+    item: LibraryItem,
+    diy_code: int,
+    *,
+    model: str = "H617A",
+    profile: ModelProfile | None = None,
+) -> CompiledEffect:
+    profile = get_profile(model) if profile is None else profile
+    result = compatibility(item, model, profile=profile)
+    if result.state is not CompatibilityState.COMPATIBLE:
+        raise ValueError("; ".join(result.reasons))
+
+    content = item.content
+    if isinstance(content, PaintedEffect):
+        content_kind = "h617a_painted"
+        upload = build_h617a_diy_painted(
+            content.effect,
+            content.speed,
+            content.brightness,
+            content.background,
+            _paint_groups(content.segments),
+            segment_count=len(content.segments),
+        )
+    elif isinstance(content, SingleEffect):
+        content_kind = "h617a_single"
+        upload = build_h617a_diy_single(
+            content.family,
+            content.variant,
+            content.speed,
+            content.palette,
+            a1_selector=profile.a1_diy_selector,
+        )
+    elif isinstance(content, MultiEffect):
+        content_kind = "h617a_multi"
+        upload = build_h617a_diy_multi(
+            tuple((effect.family, effect.variant) for effect in content.effects),
+            content.speed,
+            content.palette,
+            a1_selector=profile.a1_diy_selector,
+        )
+    else:
+        raise ValueError("unsupported H617A effect content")
+
+    resolve_diy_code(item, diy_code, model=model, profile=profile)
+    activation = build_diy_activation(diy_code, model, profile=profile)
+    digest = sha256(b"".join((*upload, activation))).hexdigest()
+    return CompiledEffect(
+        item_id=str(item.id),
+        item_version=item.version,
+        model=model,
+        content_kind=content_kind,
+        diy_code=diy_code,
+        activation_mode=ActivationMode.CUSTOM,
+        selector_kind="diy",
+        expected_effect=None,
+        upload_packets=tuple(upload),
+        activation_packet=activation,
+        artifact_sha256=digest,
+        evidence_codes=("native_diy_positive_ack_required",) if profile.diy_requires_upload_ack else (),
+        physical_ic_count=profile.physical_ic_count
+        if isinstance(content, PaintedEffect) and content.addressing == "physical_ic"
+        else None,
+        upload_transport="a1_02"
+        if profile.a1_diy_selector is not None and isinstance(content, SingleEffect | MultiEffect)
+        else "a3",
+        upload_subtype=(3 if isinstance(content, PaintedEffect) else 4 if profile.a1_diy_selector is None else None),
+    )
+
+
+def compile_h6179(item: LibraryItem, diy_code: int, *, profile: ModelProfile | None = None) -> CompiledEffect:
+    profile = profile or get_profile("H6179")
+    result = compatibility(item, "H6179", profile=profile)
+    if result.state is not CompatibilityState.COMPATIBLE:
+        raise ValueError("; ".join(result.reasons))
+    content = item.content
+    if not isinstance(content, H6179SingleDiyEffect | H6179MixedDiyEffect):
+        raise ValueError("unsupported H6179 DIY content")
+    upload = tuple(build_h6179_diy(content, profile=profile))
+    activation = build_diy_activation(diy_code, "H6179", profile=profile)
+    return CompiledEffect(
+        item_id=str(item.id),
+        item_version=item.version,
+        model="H6179",
+        content_kind="h6179_single_diy" if isinstance(content, H6179SingleDiyEffect) else "h6179_mixed_diy",
+        diy_code=diy_code,
+        activation_mode=ActivationMode.CUSTOM,
+        expected_effect=None,
+        upload_packets=upload,
+        activation_packet=activation,
+        artifact_sha256=sha256(b"".join((*upload, activation))).hexdigest(),
+        evidence_codes=("effect_content_readback_unavailable",),
+        upload_transport="a3" if profile.diy_upload_transport == "a3" else "a1_02",
+        upload_subtype=4 if profile.diy_upload_transport == "a3" else None,
+    )
+
+
+def _paint_groups(segments: tuple[tuple[int, int, int] | None, ...]) -> tuple[DiyPaintGroup, ...]:
+    grouped: dict[tuple[int, int, int], list[int]] = {}
+    for index, colour in enumerate(segments):
+        if colour is not None:
+            grouped.setdefault(colour, []).append(index)
+    return tuple(
+        DiyPaintGroup(colour, tuple(indices))
+        for colour, indices in sorted(grouped.items(), key=lambda item: item[1][0])
+    )
+
+
+def compile_h6199(
+    item: LibraryItem,
+    diy_code: int = H6199_PALETTE_DIY_APPLY_CODE,
+    *,
+    model: str = "H6199",
+    profile: ModelProfile | None = None,
+) -> CompiledEffect:
+    result = compatibility(item, model, profile=profile)
+    if result.state is not CompatibilityState.COMPATIBLE:
+        raise ValueError("; ".join(result.reasons))
+    resolve_diy_code(item, diy_code, model=model, profile=profile)
+
+    content = item.content
+    if not isinstance(content, PaletteDiyEffect):
+        raise ValueError("unsupported H6199 DIY content")
+    upload = build_h6199_palette_diy(
+        content.family,
+        content.variant,
+        content.speed,
+        content.palette,
+    )
+    activation = build_scene_activation(
+        model,
+        H6199_PALETTE_DIY_APPLY_CODE,
+        H6199_PALETTE_DIY_APPLY_MUSIC_CODE,
+        scene_type=H617A_WORKSHOP_SCENE_TYPE,
+        profile=profile,
+    )
+    digest = sha256(b"".join((*upload, activation))).hexdigest()
+    return CompiledEffect(
+        item_id=str(item.id),
+        item_version=item.version,
+        model=model,
+        content_kind="palette_diy",
+        diy_code=H6199_PALETTE_DIY_APPLY_CODE,
+        activation_mode=ActivationMode.CUSTOM,
+        selector_kind="scene",
+        expected_effect=None,
+        upload_packets=tuple(upload),
+        activation_packet=activation,
+        artifact_sha256=digest,
+        evidence_codes=("effect_content_readback_unavailable",),
+        upload_subtype=int(H6199EffectUpload.BodyKind.diy),
+    )
+
+
+def _resolve_scene(
+    model: str,
+    template: CatalogueRef,
+    *,
+    expected_scene_type: int | None = None,
+) -> tuple[str, SceneEntry]:
+    if template.catalogue_schema_version != 1:
+        raise ValueError(f"catalogue schema version {template.catalogue_schema_version} is not supported")
+    if model not in MODEL_SCENES:
+        raise ValueError(f"{model} has no scene catalogue")
+    resolved = resolve_scene_identity(model, template.scene_id, template.effect_id)
+    if resolved is None:
+        raise ValueError(f"{model} scene identity ({template.scene_id}, {template.effect_id}) was not found")
+    key, entry = resolved
+    if expected_scene_type is not None and entry.scene_type != expected_scene_type:
+        raise ValueError(
+            f"{model} scene identity ({template.scene_id}, {template.effect_id}) "
+            f"uses type {entry.scene_type}, not type {expected_scene_type}"
+        )
+    return key, entry
+
+
+def _advanced_carrier(model: str) -> tuple[str, SceneEntry]:
+    identity = get_profile(model).advanced_scene_carrier
+    if identity is None:
+        raise ValueError(f"{model} layered-scene framing is not supported")
+    scene_id, effect_id = identity
+    return _resolve_scene(
+        model,
+        CatalogueRef(model, scene_id, effect_id),
+        expected_scene_type=2,
+    )
+
+
+def compile_application(
+    item: LibraryItem,
+    model: str,
+    *,
+    diy_code: int | None = None,
+    profile: ModelProfile | None = None,
+) -> CompiledApplication:
+    if isinstance(item.content, MusicProfile):
+        return compile_music_profile(item, model, profile=profile)
+    if isinstance(item.content, VideoProfile):
+        return compile_video_profile(item, model, profile=profile)
+    if isinstance(item.content, H6179SingleDiyEffect | H6179MixedDiyEffect):
+        resolve_diy_code(item, diy_code, model=model, profile=profile)
+    elif isinstance(item.content, PaintedEffect | SingleEffect | MultiEffect):
+        resolved = resolve_diy_code(item, diy_code, model=model, profile=profile)
+        if _has_fixed_diy_slot(model, profile=profile):
+            diy_code = resolved
+        if diy_code is None:
+            raise ValueError("custom-effect application requires a DIY code")
+    return compile_effect(item, model, diy_code=diy_code, profile=profile)
+
+
+def compile_music_profile(
+    item: LibraryItem, model: str, *, profile: ModelProfile | None = None
+) -> CompiledMusicProfile:
+    profile = get_profile(model) if profile is None else profile
+    content = item.content
+    if not isinstance(content, MusicProfile):
+        raise ValueError("content is not a music profile")
+    if content.model != model:
+        raise ValueError(f"music profile targets {content.model}, not {model}")
+    calm, parameters, packets = resolve_music_profile(
+        model,
+        content.mode,
+        content.sensitivity,
+        content.colour,
+        content.calm,
+        content.parameters,
+        profile=profile,
+        palette=content.palette,
+    )
+    payload = {
+        "kind": "music_profile",
+        "model": model,
+        "mode": content.mode,
+        "sensitivity": content.sensitivity,
+        "colour": content.colour,
+        "calm": calm,
+        "parameters": parameters,
+        "packets": [packet.hex() for packet in packets],
+        **({"palette": content.palette} if content.palette is not None else {}),
+    }
+    return CompiledMusicProfile(
+        item_id=str(item.id),
+        item_version=item.version,
+        model=model,
+        mode=content.mode,
+        sensitivity=content.sensitivity,
+        colour=content.colour,
+        calm=calm,
+        parameters=MappingProxyType(parameters),
+        palette=content.palette,
+        artifact_sha256=_semantic_digest(payload),
+        packets=packets,
+        physical_ic_count=profile.physical_ic_count,
+    )
+
+
+def compile_video_profile(
+    item: LibraryItem, model: str, *, profile: ModelProfile | None = None
+) -> CompiledVideoProfile:
+    profile = get_profile(model) if profile is None else profile
+    result = compatibility(item, model, profile=profile)
+    if result.state is not CompatibilityState.COMPATIBLE:
+        raise ValueError("; ".join(result.reasons))
+    content = item.content
+    if not isinstance(content, VideoProfile):
+        raise ValueError("content is not a video profile")
+    brightness = content.relative_brightness
+    relative_brightness = (
+        None if brightness is None else tuple(getattr(brightness, zone) for zone in profile.video_brightness_zones)
+    )
+    value = (
+        content.white_balance_position if content.white_balance_position is not None else content.white_balance_value
+    )
+    white_balance_wire = (
+        None if value is None else profile.video_white_balance_calibration[value - profile.video_white_balance_min]
+    )
+    payload = {
+        "kind": "video_profile",
+        "model": model,
+        "mode": content.mode,
+        "full_screen": content.full_screen,
+        "saturation": content.saturation,
+        "sound_effects": content.sound_effects,
+        "sound_effects_softness": content.sound_effects_softness,
+        "white_balance_position": content.white_balance_position,
+        "white_balance_wire": white_balance_wire,
+        **({"white_balance_value": content.white_balance_value} if content.white_balance_value is not None else {}),
+        "relative_brightness": relative_brightness,
+        "blank_screen": content.blank_screen,
+        **({"black_border": content.black_border} if content.black_border is not None else {}),
+    }
+    policy = None
+    if (
+        content.blank_screen_detection is not None
+        and content.blank_screen_low_brightness_duration_seconds is not None
+        and content.blank_screen_same_tone_duration_seconds is not None
+    ):
+        policy = (
+            content.blank_screen_detection,
+            content.blank_screen_low_brightness_duration_seconds,
+            content.blank_screen_same_tone_duration_seconds,
+        )
+        payload["blank_screen_policy"] = policy
+    return CompiledVideoProfile(
+        item_id=str(item.id),
+        item_version=item.version,
+        model=model,
+        mode=content.mode,
+        full_screen=content.full_screen,
+        saturation=content.saturation,
+        sound_effects=content.sound_effects,
+        sound_effects_softness=content.sound_effects_softness,
+        white_balance_position=content.white_balance_position,
+        white_balance_wire=white_balance_wire,
+        relative_brightness=relative_brightness,
+        blank_screen=content.blank_screen,
+        black_border=content.black_border,
+        blank_screen_policy=policy,
+        artifact_sha256=_semantic_digest(payload),
+    )
+
+
+def _semantic_digest(payload: Mapping[str, Any]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    return sha256(encoded).hexdigest()

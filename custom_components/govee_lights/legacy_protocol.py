@@ -53,3 +53,30 @@ def build_h617a_segment_color_packet(red: int, green: int, blue: int, mask: int)
         0x05,
         [0x15, 0x01, red, green, blue, 0x00, 0x00, 0x00, 0x00, 0x00, mask & 0xFF, mask >> 8],
     )
+
+
+def build_h617a_segment_color_temp_packet(
+    kelvin: int, red: int, green: int, blue: int, mask: int
+) -> bytes:
+    """Build the H617A-family segmented native-white command."""
+    if not 0 <= kelvin <= 0xFFFF:
+        raise ValueError("Kelvin value must fit the legacy protocol")
+    if not 0 <= mask <= 0x7FFF:
+        raise ValueError("Segment mask must fit the 15-bit legacy protocol")
+    return build_single_packet(
+        0x05,
+        [
+            0x15,
+            0x01,
+            0xFF,
+            0xFF,
+            0xFF,
+            kelvin >> 8,
+            kelvin & 0xFF,
+            red,
+            green,
+            blue,
+            mask & 0xFF,
+            mask >> 8,
+        ],
+    )

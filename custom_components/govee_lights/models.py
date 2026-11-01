@@ -13,6 +13,8 @@ Per-model flags:
 
 - ``segmented``: device has individually addressable LED segments and needs
   segment-aware color commands.
+- ``h617a_segment_grammar``: model uses the documented H617A segmented static
+  colour/white packet form, including its whole-device bitmask.
 - ``segments``: number of individually addressable segments (only meaningful
   for segmented models). Defaults to :data:`DEFAULT_SEGMENT_COUNT`.
 - ``brightness_percent``: device expects brightness as a percentage (0-100)
@@ -88,8 +90,13 @@ _DEVICE_FEATURES: dict[str, dict[str, bool | int]] = {
     # grammar. The upstream packet-tested profile confirms seven logical
     # segments; expose only the compatible write path until this project ports
     # and verifies H6076's status decoder and advanced effects.
-    "H6076": {"segmented": True, "segments": 7, "brightness_percent": True},
-    "H6102": {"segmented": True, "colour_d": True},
+    "H6076": {
+        "segmented": True,
+        "segments": 7,
+        "brightness_percent": True,
+        "h617a_segment_grammar": True,
+    },
+    "H6102": {"segmented": True, "colour_d": True, "h617a_segment_grammar": True},
     "H613A": {"brightness_percent": True},
     "H613B": {"colour_d": True},
     "H613D": {"colour_d": True},
@@ -101,15 +108,35 @@ _DEVICE_FEATURES: dict[str, dict[str, bool | int]] = {
         "connection_settle": True,
         "color_write_with_response": True,
     },
-    "H617A": {"segmented": True, "brightness_percent": True, "advert_state": True},
-    "H617C": {"segmented": True, "brightness_percent": True, "advert_state": True},
-    "H617E": {"segmented": True, "brightness_percent": True, "colour_d": True},
+    "H617A": {
+        "segmented": True,
+        "brightness_percent": True,
+        "advert_state": True,
+        "h617a_segment_grammar": True,
+    },
+    "H617C": {
+        "segmented": True,
+        "brightness_percent": True,
+        "advert_state": True,
+        "h617a_segment_grammar": True,
+    },
+    "H617E": {
+        "segmented": True,
+        "brightness_percent": True,
+        "colour_d": True,
+        "h617a_segment_grammar": True,
+    },
     # Teh-Hippo's MIT-licensed, packet-tested profile defines H617F as a
     # direct H617A command/status grammar sibling.  Keep it experimental here
     # until this integration has an independent device trace, but use the
     # same established segmented/percent-brightness policy as H617A rather
     # than falling through to the unsafe single-zone generic encoder.
-    "H617F": {"segmented": True, "brightness_percent": True, "advert_state": True},
+    "H617F": {
+        "segmented": True,
+        "brightness_percent": True,
+        "advert_state": True,
+        "h617a_segment_grammar": True,
+    },
     "H618C": {"segmented": True, "brightness_percent": True},
     "H6199": {"segmented": True, "brightness_percent": True},
     # H1A42 (Strip Light 2) and H61F5 (Strip Light 2 Pro) both have the
@@ -117,8 +144,18 @@ _DEVICE_FEATURES: dict[str, dict[str, bool | int]] = {
     # explicitly documented logical geometries make the basic write path safer
     # than the generic one-zone fallback, but they remain experimental until
     # the distinct response codecs are implemented and verified here.
-    "H1A42": {"segmented": True, "segments": 5, "brightness_percent": True},
-    "H61F5": {"segmented": True, "segments": 10, "brightness_percent": True},
+    "H1A42": {
+        "segmented": True,
+        "segments": 5,
+        "brightness_percent": True,
+        "h617a_segment_grammar": True,
+    },
+    "H61F5": {
+        "segmented": True,
+        "segments": 10,
+        "brightness_percent": True,
+        "h617a_segment_grammar": True,
+    },
 }
 
 # Profiles with a known wire family. A feature entry not present here remains
@@ -194,6 +231,11 @@ def uses_percent_brightness(model: str) -> bool:
 def uses_colour_d_mode(model: str) -> bool:
     """Return True when *model* uses mode byte 0x0D instead of 0x02."""
     return bool(_model_features(model).get("colour_d", False))
+
+
+def uses_h617a_segment_grammar(model: str) -> bool:
+    """Return True when segmented static colours use H617A packet grammar."""
+    return bool(_model_features(model).get("h617a_segment_grammar", False))
 
 
 def uses_color_command_ack_state(model: str) -> bool:

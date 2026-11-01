@@ -31,7 +31,10 @@ from homeassistant.helpers.event import async_call_later
 from .const import DOMAIN
 from .coordinator import GoveeCoordinator
 from .govee import GoveeHelper
-from .legacy_protocol import build_h617a_segment_color_packet
+from .legacy_protocol import (
+    build_h617a_segment_color_packet,
+    build_h617a_segment_color_temp_packet,
+)
 from .legacy_protocol import build_single_packet as build_legacy_single_packet
 from .legacy_protocol import sign_payload as sign_legacy_payload
 
@@ -48,6 +51,7 @@ from .models import (
     uses_color_write_with_response,
     uses_colour_d_mode,
     uses_connection_settle,
+    uses_h617a_segment_grammar,
     uses_percent_brightness,
 )
 
@@ -180,6 +184,13 @@ class GoveeBLE(GoveeHelper):
     def build_segment_color_packet(red: int, green: int, blue: int, mask: int) -> bytes:
         """Build an H617A-family segmented RGB frame."""
         return build_h617a_segment_color_packet(red, green, blue, mask)
+
+    @staticmethod
+    def build_segment_color_temp_packet(
+        kelvin: int, red: int, green: int, blue: int, mask: int
+    ) -> bytes:
+        """Build an H617A-family segmented native-white frame."""
+        return build_h617a_segment_color_temp_packet(kelvin, red, green, blue, mask)
 
     @staticmethod
     def build_segment_packets(
@@ -712,10 +723,18 @@ class GoveeBLECoordinator(GoveeCoordinator):
         future state-query notifications return a garbled colour.
         """
         r, g, b = GoveeBLE.kelvin_to_rgb(kelvin)
+        # Documented H617A-family products carry native white in their
+        # segmented static packet. This must precede the 0x0D rule: H6102 and
+        # H617E have both flags but use the H617A form when segmented.
+        if uses_h617a_segment_grammar(self.model):
+            whole_device_mask = (1 << self.segment_count) - 1
+            packet = GoveeBLE.build_segment_color_temp_packet(
+                kelvin, r, g, b, whole_device_mask
+            )
         # H613E's 0x0D/Bk serializer has a distinct CT form from plain RGB:
         # 0D FF FF FF <kelvin:big-endian> <temperature RGB>.  The app's
         # SubModeColor4Bk writes the kelvin short before the temperature RGB.
-        if uses_colour_d_mode(self.model):
+        elif uses_colour_d_mode(self.model):
             packet_data = [
                 GoveeBLE.LEDMode.COLOUR_D,
                 0xFF,

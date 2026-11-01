@@ -15,6 +15,7 @@ _SPEC.loader.exec_module(_PROTOCOL)
 
 build_single_packet = _PROTOCOL.build_single_packet
 build_h617a_segment_color_packet = _PROTOCOL.build_h617a_segment_color_packet
+build_h617a_segment_color_temp_packet = _PROTOCOL.build_h617a_segment_color_temp_packet
 sign_payload = _PROTOCOL.sign_payload
 
 
@@ -49,6 +50,13 @@ def test_h617a_segment_rgb_uses_only_the_declared_five_segment_mask() -> None:
     frame = build_h617a_segment_color_packet(10, 20, 30, 0x001F)
 
     assert frame.hex() == "330515010a141e00000000001f0000000000003d"
+    assert sign_payload(frame[:-1]) == frame[-1]
+
+
+def test_h617a_segment_white_frame_matches_upstream_packet_fixture() -> None:
+    frame = build_h617a_segment_color_temp_packet(4000, 255, 213, 161, 0x7FFF)
+
+    assert frame.hex() == "33051501ffffff0fa0ffd5a1ff7f000000000079"
     assert sign_payload(frame[:-1]) == frame[-1]
 
 

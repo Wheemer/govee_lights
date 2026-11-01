@@ -15,6 +15,7 @@ _SPEC.loader.exec_module(_MODELS)
 
 SupportQuality = _MODELS.SupportQuality
 get_model_profile = _MODELS.get_model_profile
+uses_h617a_segment_grammar = _MODELS.uses_h617a_segment_grammar
 
 
 def test_h613e_profile_is_verified_and_uses_its_bk_family() -> None:
@@ -34,6 +35,7 @@ def test_h617f_uses_the_explicit_h617a_compatible_experimental_profile() -> None
         "segmented": True,
         "brightness_percent": True,
         "advert_state": True,
+        "h617a_segment_grammar": True,
     }
 
 
@@ -46,6 +48,7 @@ def test_h6076_keeps_its_known_seven_segment_h617a_write_profile_experimental() 
         "segmented": True,
         "segments": 7,
         "brightness_percent": True,
+        "h617a_segment_grammar": True,
     }
 
 
@@ -64,7 +67,17 @@ def test_h617a_command_siblings_keep_their_known_segment_geometry(
         "segmented": True,
         "segments": segments,
         "brightness_percent": True,
+        "h617a_segment_grammar": True,
     }
+
+
+@pytest.mark.parametrize("model", ["H6076", "H6102", "H617A", "H617C", "H617E", "H617F"])
+def test_known_h617a_command_models_opt_into_the_segmented_white_grammar(model: str) -> None:
+    assert uses_h617a_segment_grammar(model)
+
+
+def test_unrelated_segmented_model_does_not_inherit_h617a_white_grammar() -> None:
+    assert not uses_h617a_segment_grammar("H6199")
 
 
 def test_unlisted_model_remains_a_generic_fallback() -> None:

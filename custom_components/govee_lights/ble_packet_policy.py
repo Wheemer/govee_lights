@@ -20,6 +20,24 @@ def encode_ha_brightness(
     return (low * 100 + (percent - 1) * (high - low + 3)) // 100
 
 
+def decode_device_brightness(
+    register: int, *, percentage: bool, wire_range: tuple[int, int] | None = None
+) -> int:
+    """Convert a device brightness register to Home Assistant's 0..255 scale."""
+    if not 0 <= register <= 255:
+        raise ValueError("Device brightness register must be from 0 to 255")
+    if register == 0:
+        return 0
+    if wire_range is not None:
+        low, high = wire_range
+        clamped = min(max(register, low), high)
+        percent = max(1, min(100, 1 - (-((clamped - low) * 100) // (high - low + 3))))
+        return round(percent * 255 / 100)
+    if percentage:
+        return round(register * 255 / 100)
+    return register
+
+
 def build_color_temp_packet(
     *,
     kelvin: int,

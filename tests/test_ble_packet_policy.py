@@ -23,6 +23,7 @@ for _module_name in ("legacy_protocol", "ble_packet_policy"):
 
 build_color_temp_packet = sys.modules["govee_lights.ble_packet_policy"].build_color_temp_packet
 encode_ha_brightness = sys.modules["govee_lights.ble_packet_policy"].encode_ha_brightness
+decode_device_brightness = sys.modules["govee_lights.ble_packet_policy"].decode_device_brightness
 
 
 def test_h617a_packet_takes_priority_over_colour_d_for_segmented_models() -> None:
@@ -61,10 +62,21 @@ def test_generic_legacy_packet_remains_available_for_plain_ble_lights() -> None:
     assert packet.hex() == "330502ffffff01ffd5a100000000000000000041"
 
 
-@pytest.mark.parametrize(("ha_brightness", "register"), [(26, 41), (128, 136), (255, 254)])
+@pytest.mark.parametrize(
+    ("ha_brightness", "register", "percent"),
+    [(26, 41, 10), (128, 136, 50), (255, 254, 100)],
+)
 def test_h6102_brightness_uses_its_documented_register_range(
-    ha_brightness: int, register: int
+    ha_brightness: int, register: int, percent: int
 ) -> None:
     assert encode_ha_brightness(
         ha_brightness, percentage=True, wire_range=(20, 254)
     ) == register
+    assert decode_device_brightness(
+        register, percentage=True, wire_range=(20, 254)
+    ) == round(percent * 255 / 100)
+
+
+def test_h6102_brightness_decoder_treats_zero_as_off_and_clamps_registers() -> None:
+    assert decode_device_brightness(0, percentage=True, wire_range=(20, 254)) == 0
+    assert decode_device_brightness(1, percentage=True, wire_range=(20, 254)) == round(255 / 100)

@@ -28,7 +28,11 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.event import async_call_later
 
-from .ble_packet_policy import build_color_temp_packet, encode_ha_brightness
+from .ble_packet_policy import (
+    build_color_temp_packet,
+    decode_device_brightness,
+    encode_ha_brightness,
+)
 from .const import DOMAIN
 from .coordinator import GoveeCoordinator
 from .govee import GoveeHelper
@@ -508,9 +512,12 @@ class GoveeBLECoordinator(GoveeCoordinator):
     @property
     def brightness(self) -> int:
         """Brightness in HA scale (0-255)."""
-        if uses_percent_brightness(self.model):
-            return round(self.brightness_raw * 255 / 100)
-        return self.brightness_raw
+        return decode_device_brightness(
+            self.brightness_raw,
+            percentage=uses_percent_brightness(self.model)
+            or get_brightness_wire_range(self.model) is not None,
+            wire_range=get_brightness_wire_range(self.model),
+        )
 
     @property
     def current_rgb_color(self) -> tuple[int, int, int] | None:

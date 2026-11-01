@@ -1,6 +1,10 @@
 """Regression fixtures for the bounded H613E compatibility profile."""
 
-from custom_components.govee_unified.const import _LEGACY_GENERIC_RGB_MODELS, MODEL_PROFILES
+from custom_components.govee_unified.const import (
+    _LEGACY_GENERIC_RGB_MODELS,
+    MODEL_PROFILES,
+    model_from_ble_name,
+)
 from custom_components.govee_unified.generated_protocol_adapter import (
     build_brightness,
     require_profile_packet,
@@ -124,3 +128,10 @@ def test_generic_legacy_family_uses_the_ported_raw_rgb_wire_format() -> None:
         assert profile.outbound_transform is not None
         assert profile.outbound_transform(rgb).hex() == "3305020a141e0000000000000000000000000034"
         assert profile.outbound_transform(brightness).hex() == "33047f0000000000000000000000000000000048"
+
+
+def test_generic_legacy_family_resolves_from_govee_advertisement_names() -> None:
+    """Broad manifest matchers still proceed only for known profile SKUs."""
+    for model in _LEGACY_GENERIC_RGB_MODELS:
+        assert model_from_ble_name(f"Govee_{model}_1234") == model
+    assert model_from_ble_name("Govee_H9999_1234") is None

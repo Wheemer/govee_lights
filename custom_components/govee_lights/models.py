@@ -100,6 +100,7 @@ _DEVICE_FEATURES: dict[str, dict[str, bool | int]] = {
         "brightness_percent": True,
         "h617a_segment_grammar": True,
         "segment_readback_group_size": 4,
+        "segment_brightness": True,
     },
     "H6102": {
         "segmented": True,
@@ -124,18 +125,21 @@ _DEVICE_FEATURES: dict[str, dict[str, bool | int]] = {
         "brightness_percent": True,
         "advert_state": True,
         "h617a_segment_grammar": True,
+        "segment_brightness": True,
     },
     "H617C": {
         "segmented": True,
         "brightness_percent": True,
         "advert_state": True,
         "h617a_segment_grammar": True,
+        "segment_brightness": True,
     },
     "H617E": {
         "segmented": True,
         "brightness_percent": True,
         "colour_d": True,
         "h617a_segment_grammar": True,
+        "segment_brightness": True,
     },
     # Teh-Hippo's MIT-licensed, packet-tested profile defines H617F as a
     # direct H617A command/status grammar sibling.  Keep it experimental here
@@ -147,6 +151,7 @@ _DEVICE_FEATURES: dict[str, dict[str, bool | int]] = {
         "brightness_percent": True,
         "advert_state": True,
         "h617a_segment_grammar": True,
+        "segment_brightness": True,
     },
     "H618C": {"segmented": True, "brightness_percent": True},
     "H6199": {"segmented": True, "brightness_percent": True},
@@ -161,6 +166,7 @@ _DEVICE_FEATURES: dict[str, dict[str, bool | int]] = {
         "brightness_percent": True,
         "h617a_segment_grammar": True,
         "segment_readback_group_size": 4,
+        "segment_brightness": True,
     },
     "H61F5": {
         "segmented": True,
@@ -168,6 +174,7 @@ _DEVICE_FEATURES: dict[str, dict[str, bool | int]] = {
         "brightness_percent": True,
         "h617a_segment_grammar": True,
         "segment_readback_group_size": 4,
+        "segment_brightness": True,
     },
 }
 

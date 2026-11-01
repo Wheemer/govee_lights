@@ -39,6 +39,7 @@ def test_h617f_uses_the_explicit_h617a_compatible_experimental_profile() -> None
         "brightness_percent": True,
         "advert_state": True,
         "h617a_segment_grammar": True,
+        "segment_brightness": True,
     }
 
 
@@ -53,6 +54,7 @@ def test_h6076_keeps_its_known_seven_segment_h617a_write_profile_experimental() 
         "brightness_percent": True,
         "h617a_segment_grammar": True,
         "segment_readback_group_size": 4,
+        "segment_brightness": True,
     }
 
 
@@ -73,6 +75,7 @@ def test_h617a_command_siblings_keep_their_known_segment_geometry(
         "brightness_percent": True,
         "h617a_segment_grammar": True,
         "segment_readback_group_size": 4,
+        "segment_brightness": True,
     }
 
 
@@ -98,7 +101,12 @@ def test_h6102_declares_its_documented_brightness_register_range() -> None:
     assert get_brightness_wire_range("H6102") == (20, 254)
     assert get_brightness_wire_range("H617A") is None
     assert supports_segment_brightness("H6102")
-    assert not supports_segment_brightness("H617A")
+    assert supports_segment_brightness("H617A")
+
+
+@pytest.mark.parametrize("model", ["H6076", "H617A", "H617C", "H617E", "H617F", "H1A42", "H61F5"])
+def test_h617a_command_siblings_expose_native_segment_brightness(model: str) -> None:
+    assert supports_segment_brightness(model)
 
 
 def test_unlisted_model_remains_a_generic_fallback() -> None:

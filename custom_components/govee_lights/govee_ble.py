@@ -783,7 +783,7 @@ class GoveeBLECoordinator(GoveeCoordinator):
     async def async_set_segment_brightness(
         self, brightness: dict[int, int], *, verify: bool = True
     ) -> None:
-        """Apply H6102's native per-segment brightness packets."""
+        """Apply native H617A-family per-segment brightness packets."""
         if not self.supports_native_segment_brightness:
             raise HomeAssistantError(f"Govee {self.model} has no native segment brightness")
         grouped: dict[int, int] = {}

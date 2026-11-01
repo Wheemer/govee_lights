@@ -22,6 +22,8 @@ async def async_setup_entry(
             async_add_entities([GoveePassiveOccupancySensor(coordinator), GoveePassiveMotionSensor(coordinator)])
         elif coordinator.model == "H5123":
             async_add_entities([GoveeEncryptedWindowSensor(coordinator)])
+        elif coordinator.model == "H5130":
+            async_add_entities([GoveeEncryptedPressureSensor(coordinator)])
         return
     if "lan_ip" not in config_entry.data:
         return
@@ -74,3 +76,18 @@ class GoveeEncryptedWindowSensor(_GoveePassivePresenceSensor):
     def is_on(self) -> bool | None:
         data = self.coordinator.data
         return data.status == 2 if isinstance(data, EncryptedEventAdvertisement) else None
+
+
+class GoveeEncryptedPressureSensor(_GoveePassivePresenceSensor):
+    """Pressure state from the H5130 encrypted advertisement bitfield."""
+
+    _attr_name = "Presence"
+    _attr_device_class = BinarySensorDeviceClass.PRESENCE
+
+    def __init__(self, coordinator: GoveePassiveSensorCoordinator) -> None:
+        super().__init__(coordinator, "presence")
+
+    @property
+    def is_on(self) -> bool | None:
+        data = self.coordinator.data
+        return bool(data.status & 0x01) if isinstance(data, EncryptedEventAdvertisement) else None

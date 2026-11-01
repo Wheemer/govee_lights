@@ -66,3 +66,12 @@ def test_encrypted_h5123_window_fixture_is_authenticated_then_decoded() -> None:
     assert protocol.parse_environment_advertisement("Govee_H5106_0001", {1: bytes.fromhex("0000014a3b00")}) == protocol.EnvironmentAdvertisement(
         "H5106", 2.1, 64.1, pm25_ug_m3=984
     )
+
+
+def test_encrypted_h5130_fixture_preserves_the_pressure_and_button_bits() -> None:
+    off = bytes.fromhex("4775009b24ecdd986aa7bdda57ff4583cd3d3973e802e24e")
+    on = bytes.fromhex("477500ae6750fa3447445146492085c27610ea02b3a0063f")
+    button = bytes.fromhex("477500d6a6a51019ce84013004eed9b6b9ebe156e8b4d0c1")
+    assert protocol.parse_encrypted_event_advertisement("GV51307479", {61320: off}) == protocol.EncryptedEventAdvertisement("H5130", 100, 0)
+    assert protocol.parse_encrypted_event_advertisement("GV51307479", {61320: on}) == protocol.EncryptedEventAdvertisement("H5130", 100, 1)
+    assert protocol.parse_encrypted_event_advertisement("GV51307479", {61320: button}) == protocol.EncryptedEventAdvertisement("H5130", 100, 0x10)

@@ -28,6 +28,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.event import async_call_later
 
+from .ble_packet_policy import build_color_temp_packet
 from .const import DOMAIN
 from .coordinator import GoveeCoordinator
 from .govee import GoveeHelper
@@ -723,34 +724,12 @@ class GoveeBLECoordinator(GoveeCoordinator):
         future state-query notifications return a garbled colour.
         """
         r, g, b = GoveeBLE.kelvin_to_rgb(kelvin)
-        # Documented H617A-family products carry native white in their
-        # segmented static packet. This must precede the 0x0D rule: H6102 and
-        # H617E have both flags but use the H617A form when segmented.
-        if uses_h617a_segment_grammar(self.model):
-            whole_device_mask = (1 << self.segment_count) - 1
-            packet = GoveeBLE.build_segment_color_temp_packet(
-                kelvin, r, g, b, whole_device_mask
-            )
-        # H613E's 0x0D/Bk serializer has a distinct CT form from plain RGB:
-        # 0D FF FF FF <kelvin:big-endian> <temperature RGB>.  The app's
-        # SubModeColor4Bk writes the kelvin short before the temperature RGB.
-        elif uses_colour_d_mode(self.model):
-            packet_data = [
-                GoveeBLE.LEDMode.COLOUR_D,
-                0xFF,
-                0xFF,
-                0xFF,
-                (kelvin >> 8) & 0xFF,
-                kelvin & 0xFF,
-                r,
-                g,
-                b,
-            ]
-        else:
-            packet_data = [GoveeBLE.LEDMode.MANUAL, 0xFF, 0xFF, 0xFF, 0x01, r, g, b]
-        packet = GoveeBLE.build_single_packet(
-            GoveeBLE.LEDCommand.COLOR,
-            packet_data,
+        packet = build_color_temp_packet(
+            kelvin=kelvin,
+            rgb=(r, g, b),
+            segment_count=self.segment_count,
+            h617a_segment_grammar=uses_h617a_segment_grammar(self.model),
+            colour_d=uses_colour_d_mode(self.model),
         )
         self.color_temp_kelvin = kelvin
         self.rgb_color = (r, g, b)

@@ -10,6 +10,8 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import GoveeBLEConfigEntry
+from .appliance_coordinator import GoveeApplianceCoordinator
+from .appliance_entity import GoveeApplianceEntity
 from .const import DOMAIN
 from .entity import GoveeBLEEntity
 
@@ -21,6 +23,9 @@ async def async_setup_entry(
     entry: GoveeBLEConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
+    if isinstance(entry.runtime_data, GoveeApplianceCoordinator):
+        async_add_entities([GoveeIceMakerSwitch(entry.runtime_data)])
+        return
     added: set[str] = set()
 
     def add_qualified() -> None:
@@ -79,3 +84,24 @@ class GoveeBLEControlSwitch(GoveeBLEEntity, SwitchEntity):
                 await self.coordinator.async_set_boolean_control(self._control, enabled)
         except (BleakError, ValueError, TimeoutError) as error:
             raise HomeAssistantError(translation_domain=DOMAIN, translation_key="device_command_failed") from error
+
+
+class GoveeIceMakerSwitch(GoveeApplianceEntity, SwitchEntity):
+    """Start/cancel ice making for APK-confirmed H7172-family appliances."""
+
+    _attr_name = "Ice Maker"
+
+    def __init__(self, coordinator: GoveeApplianceCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.address.replace(':', '').lower()}_ice_maker"
+        self._attr_device_info = coordinator.device_info
+
+    @property
+    def is_on(self) -> bool | None:
+        return self.coordinator.is_on
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_power(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_power(False)

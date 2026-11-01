@@ -37,6 +37,7 @@ from .music_semantics import (
 )
 
 DOMAIN = "govee_unified"
+APPLIANCE_MODELS = frozenset({"H7172", "H7178", "H717D"})
 CONF_LAN_IP = "lan_ip"
 CONF_LAN_DEVICE_ID = "lan_device_id"
 CONF_LAN_SKU = "lan_sku"
@@ -2494,8 +2495,16 @@ def model_from_ble_name(name: str) -> str | None:
     if match is None:
         return None
     raw = next(group for group in match.groups() if group is not None)
-    model = resolve_model(raw if len(raw) == 5 else f"H{raw}")
-    return model if model in BLE_DISCOVERABLE_MODELS else None
+    candidate = (raw if len(raw) == 5 else f"H{raw}").upper()
+    model = resolve_model(candidate)
+    if model in BLE_DISCOVERABLE_MODELS:
+        return model
+    return candidate if candidate in APPLIANCE_MODELS else None
+
+
+def is_appliance_model(model: str) -> bool:
+    """Return whether *model* uses the separate local appliance coordinator."""
+    return model.strip().upper() in APPLIANCE_MODELS
 
 
 def protocol_model(model: str) -> str | None:

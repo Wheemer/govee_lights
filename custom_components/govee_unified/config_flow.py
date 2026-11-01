@@ -41,6 +41,8 @@ from .const import (
     DEFAULT_FADE,
     DOMAIN,
     MODEL_PROFILES,
+    APPLIANCE_MODELS,
+    is_appliance_model,
     SupportQuality,
     default_effect_categories,
     model_from_ble_name,
@@ -182,6 +184,9 @@ class GoveeConfigFlow(ConfigFlow, domain=DOMAIN):
     async def _async_finish_new_device(self, data: dict[str, str]) -> ConfigFlowResult:
         model = data[CONF_MODEL]
         self._pending_device = data
+        if is_appliance_model(model):
+            self._abort_if_unique_id_configured()
+            return self.async_create_entry(title=f"Govee {model}", data=data)
         if MODEL_PROFILES[model].support_quality is SupportQuality.EXPERIMENTAL:
             self.context["title_placeholders"] = {"name": model}
             return await self.async_step_experimental()
@@ -260,7 +265,7 @@ class GoveeConfigFlow(ConfigFlow, domain=DOMAIN):
     def _show_user_form(
         self, *, errors: dict[str, str] | None = None, step_id: str = "user"
     ) -> ConfigFlowResult:
-        models = list(MODEL_PROFILES.keys())
+        models = [*MODEL_PROFILES.keys(), *sorted(APPLIANCE_MODELS)]
         return self.async_show_form(
             step_id=step_id,
             data_schema=vol.Schema(

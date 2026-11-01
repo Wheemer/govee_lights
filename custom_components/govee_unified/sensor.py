@@ -6,6 +6,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import GoveeBLEConfigEntry
+from .appliance_coordinator import GoveeApplianceCoordinator
+from .appliance_entity import GoveeApplianceEntity
 from .coordinator import GoveeBLECoordinator
 from .effect_contracts import CapabilityState
 from .entity import GoveeBLEEntity
@@ -18,6 +20,9 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: GoveeBLEConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator = entry.runtime_data
+    if isinstance(coordinator, GoveeApplianceCoordinator):
+        async_add_entities([GoveeIceMakerWorkStatus(coordinator)])
+        return
     if coordinator.model != "H6199":
         return
     added = False
@@ -48,3 +53,18 @@ class GoveeBLECameraStatus(GoveeBLEEntity, SensorEntity):
         if h6199_camera_controls_state(self.coordinator.model, self.coordinator) is not CapabilityState.SUPPORTED:
             return "unknown"
         return self.coordinator.camera_status
+
+
+class GoveeIceMakerWorkStatus(GoveeApplianceEntity, SensorEntity):
+    _attr_name = "Work Status"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = ["idle", "ice_making", "ice_full", "washing", "wash_finished", "scheduled", "unknown"]
+
+    def __init__(self, coordinator: GoveeApplianceCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.address.replace(':', '').lower()}_work_status"
+        self._attr_device_info = coordinator.device_info
+
+    @property
+    def native_value(self) -> str:
+        return self.coordinator.work_status

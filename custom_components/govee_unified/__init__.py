@@ -34,6 +34,7 @@ from .const import (
     CONNECTION_MODE_RELEASE,
     DOMAIN,
     MODEL_PROFILES,
+    is_appliance_model,
     always_include_custom_effects_from_options,
     default_effect_categories,
     effect_categories_from_options,
@@ -44,6 +45,7 @@ from .const import (
     supported_effect_categories,
 )
 from .coordinator import GoveeBLECoordinator, clear_availability_log_state
+from .appliance_coordinator import GoveeApplianceCoordinator
 from .coordinator_dreamview import (
     async_cleanup_dreamview_claims_on_entry_removed,
     async_guard_dreamview_entry,
@@ -54,7 +56,7 @@ from .effect_setup import async_setup_effects, get_effect_backend
 from .lan_coordinator import GoveeLANCoordinator
 from .light_services import async_register_light_services
 
-type GoveeBLEConfigEntry = ConfigEntry[GoveeBLECoordinator]
+type GoveeBLEConfigEntry = ConfigEntry[GoveeBLECoordinator | GoveeApplianceCoordinator]
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 BLE_PLATFORMS = [Platform.LIGHT, Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH]
@@ -263,9 +265,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: GoveeBLEConfigEntry) -> 
         await entry.runtime_data.async_setup()
         await hass.config_entries.async_forward_entry_setups(entry, LAN_PLATFORMS)
         return True
+    raw_model = entry.data.get(CONF_MODEL)
+    if isinstance(raw_model, str) and is_appliance_model(raw_model):
+        coordinator = GoveeApplianceCoordinator(hass, entry.unique_id, raw_model.strip().upper())
+        await coordinator.async_config_entry_first_refresh()
+        entry.runtime_data = coordinator
+        await hass.config_entries.async_forward_entry_setups(entry, [Platform.SENSOR, Platform.SWITCH])
+        return True
     if await async_guard_dreamview_entry(hass, entry):
         raise ConfigEntryNotReady("Config entry is claimed by a DreamView sync centre")
-    raw_model = entry.data.get(CONF_MODEL)
     model = resolve_model(raw_model) if isinstance(raw_model, str) else None
     issue_id = _unsupported_model_issue_id(entry)
     if model is None:
@@ -374,6 +382,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: GoveeBLEConfigEntry) ->
         if unload_ok := await hass.config_entries.async_unload_platforms(entry, LAN_PLATFORMS):
             entry.runtime_data.cleanup()
         return unload_ok
+    if isinstance(entry.runtime_data, GoveeApplianceCoordinator):
+        if unload_ok := await hass.config_entries.async_unload_platforms(entry, [Platform.SENSOR, Platform.SWITCH]):
+            await entry.runtime_data.async_shutdown()
+        return unload_ok
     effect_backend = get_effect_backend(hass)
     if effect_backend is not None:
         await effect_backend.preview.async_unload_device(entry.entry_id)
@@ -390,6 +402,13 @@ async def async_remove_entry(hass: HomeAssistant, entry: GoveeBLEConfigEntry) ->
     if entry.data.get(CONF_LAN_IP) is not None:
         # LAN entries never register BLE Effect Studio state or DreamView
         # claims. Keep their teardown in the LAN transport boundary.
+        ir.async_delete_issue(hass, DOMAIN, _unsupported_model_issue_id(entry))
+        if entry.unique_id is not None:
+            clear_availability_log_state(hass, entry.unique_id)
+            clear_stale_gatt_recovery(hass, entry.unique_id)
+        return
+    raw_model = entry.data.get(CONF_MODEL)
+    if isinstance(raw_model, str) and is_appliance_model(raw_model):
         ir.async_delete_issue(hass, DOMAIN, _unsupported_model_issue_id(entry))
         if entry.unique_id is not None:
             clear_availability_log_state(hass, entry.unique_id)

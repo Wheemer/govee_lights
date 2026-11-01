@@ -768,6 +768,16 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
         whole_device_mask=1,
         connection_idle_timeout=3.0,
     ),
+    "H613A": ModelProfile(
+        "H613A LED Strip",
+        support_quality=SupportQuality.SUPPORTED,
+        command_grammar="H600A",
+        command_operations=frozenset({"power", "brightness", "static"}),
+        outbound_transform=transform_legacy_0d_percent_brightness,
+        supports_rgb=True,
+        whole_device_mask=1,
+        connection_idle_timeout=3.0,
+    ),
     "H613B": ModelProfile(
         "H613B LED Strip",
         support_quality=SupportQuality.SUPPORTED,
